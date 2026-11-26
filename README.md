@@ -28,7 +28,7 @@ trainings and workshops.
 ```
 ┌─────────────────────────────┐
 │  React UI (Stitch design)   │
-│  Instructor dashboard       │
+│  Lab Manager dashboard       │
 └──────────────┬──────────────┘
                │ REST / JSON
                ▼
@@ -49,7 +49,7 @@ trainings and workshops.
 - **Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0, Pydantic 2, httpx
 - **Frontend:** React 18 + TypeScript + Vite + Tailwind CSS
 - **DB:** PostgreSQL (via Docker Compose)
-- **Auth:** Single instructor account, JWT
+- **Auth:** Single Lab Manager account, JWT
 - **Deployment:** Docker Compose (frontend nginx reverse proxy)
 
 
@@ -196,7 +196,7 @@ This was forked from https://github.com/whiteov3rflow/ludus-helm and modified to
 
 ## Roadmap
 
-- **UW NetID SSO login** — add an option to log into ludus-mgr (instructor dashboard,
+- **UW NetID SSO login** — add an option to log into ludus-mgr (Lab Manager dashboard,
   and/or the student invite flow) via University of Washington SSO instead of the
   current single-admin JWT login. Notes for when this gets picked up:
   - UW's generally-available protocol is **SAML 2.0** via their Shibboleth IdP, with
