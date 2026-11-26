@@ -70,21 +70,7 @@ const TAB_GROUPS: TabGroup[] = [
   },
 ];
 
-// Ludus v1 (1.11.x) capability flag. When true, features whose Ludus
-// endpoints do not exist on v1 are hidden. Flip to false (or make it a
-// runtime capability check) when targeting a newer Ludus. Kept as a const
-// so gated JSX is still type-checked and identifiers stay referenced.
-const LUDUS_V1 = true;
-
-// Tabs whose underlying Ludus endpoints do not exist on Ludus v1 (1.11.x).
-// They are hidden from the nav; their tab components remain in the file
-// (referenced below) so re-enabling them on a newer Ludus is a one-line change.
-const HIDDEN_V1_TABS = new Set<string>(LUDUS_V1 ? ["groups"] : []);
-
-const VISIBLE_TAB_GROUPS: TabGroup[] = TAB_GROUPS.map((g) => ({
-  ...g,
-  tabs: g.tabs.filter((t) => !HIDDEN_V1_TABS.has(t.id)),
-})).filter((g) => g.tabs.length > 0);
+const VISIBLE_TAB_GROUPS: TabGroup[] = TAB_GROUPS;
 
 export default function LudusManagement() {
   const [activeTab, setActiveTab] = useState("ranges");
@@ -358,19 +344,17 @@ function RangesTab({ server }: { server: string }) {
     },
     {
       key: "rangeID",
-      label: "User / ID",
-      // Ludus v1 keys ranges by userID (rangeID is null); fall back to it.
+      label: "Range ID",
       render: (r) => (
-        <span className="font-mono text-text-secondary">{r.userID ?? r.rangeID ?? "-"}</span>
+        <span className="font-mono text-text-secondary">{r.rangeID ?? r.userID ?? "-"}</span>
       ),
     },
     {
       key: "name",
       label: "Name",
       sortable: true,
-      sortValue: (r) => (r.name || r.userID || "").toLowerCase(),
-      // v1 ranges have no name of their own; fall back to the owning userID.
-      render: (r) => <span className="text-text-primary">{r.name || r.userID || "-"}</span>,
+      sortValue: (r) => (r.name || r.rangeID || "").toLowerCase(),
+      render: (r) => <span className="text-text-primary">{r.name || r.rangeID || "-"}</span>,
     },
     {
       key: "vms",
@@ -431,7 +415,6 @@ function RangesTab({ server }: { server: string }) {
         searchable
         searchPlaceholder="Search ranges..."
         searchFilter={(r, q) =>
-          // Ludus v1 has a null rangeID; ranges are keyed by the owning userID.
           (r.rangeID || r.userID || "").toLowerCase().includes(q) ||
           (r.name || "").toLowerCase().includes(q)
         }
@@ -1287,18 +1270,13 @@ function UsersTab({ server }: { server: string }) {
       label: "Actions",
       render: (u) => (
         <div className="flex items-center gap-1">
-          {/* "Assign to range" uses /ranges/assign, absent on Ludus v1.
-              Range sharing on v1 is driven by session provisioning
-              (cross-range access grants). Hidden until targeting newer Ludus. */}
-          {!LUDUS_V1 && (
-            <Button
-              variant="icon"
-              onClick={() => setAssignUser(u)}
-              title="Assign to range"
-            >
-              <Link className="h-4 w-4 text-accent-success" />
-            </Button>
-          )}
+          <Button
+            variant="icon"
+            onClick={() => setAssignUser(u)}
+            title="Assign to range"
+          >
+            <Link className="h-4 w-4 text-accent-success" />
+          </Button>
           <Button
             variant="icon"
             onClick={() => handleDownloadWireguard(u)}

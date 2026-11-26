@@ -33,7 +33,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* Logo */}
       <div className="p-7 pb-6 border-b border-border/50">
         <div className="flex items-center gap-3">
-          <svg width="36" height="36" viewBox="0 0 64 64" role="img" aria-label="Ludus-v1 Mgr" className="shrink-0">
+          <svg width="36" height="36" viewBox="0 0 64 64" role="img" aria-label="Ludus Mgr" className="shrink-0">
             <g transform="translate(32 32)">
               <circle cx="0" cy="0" r="26" fill="none" stroke="#00D4AA" strokeWidth="3.5"/>
               <circle cx="0" cy="0" r="7" fill="none" stroke="#00D4AA" strokeWidth="3.5"/>
@@ -53,8 +53,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <div>
             <div className="flex items-baseline gap-0 whitespace-nowrap leading-none">
               <span className="text-lg font-bold text-text-primary">Ludus</span>
-              <span className="text-lg font-bold text-accent-success">-v1</span>
-              <span className="text-lg font-bold text-text-primary">&nbsp;Mgr</span>
+              <span className="text-lg font-bold text-accent-success">&nbsp;Mgr</span>
             </div>
             <p className="text-xs text-text-muted tracking-normal mt-1">
               Ludus Labs Manager

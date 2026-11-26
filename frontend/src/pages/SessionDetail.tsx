@@ -1314,7 +1314,6 @@ function InlineRangePicker({
   );
 }
 
-// Ludus groups do not exist on Ludus v1, so group-based add is not offered.
 type AddStudentMode = "manual" | "ludus-user";
 
 function AddStudentModal({

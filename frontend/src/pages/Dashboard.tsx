@@ -676,10 +676,9 @@ function CreateSessionModal({
                 <option value="">Select a range...</option>
                 <option value="__auto__">Auto-create from template</option>
                 {ranges.map((r) => {
-                  // Ludus v1 identifies a range by the owning user (userID);
-                  // rangeID/name are null there. The chosen value becomes the
-                  // session's shared_range_id (the range owner students share).
-                  const id = r.userID ?? r.rangeID ?? String(r.rangeNumber);
+                  // The chosen value becomes the session's shared_range_id
+                  // (the range students are assigned access to).
+                  const id = r.rangeID ?? r.userID ?? String(r.rangeNumber);
                   const label = r.name ? `${id} · ${r.name}` : id;
                   return (
                     <option key={id} value={id}>
