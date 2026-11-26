@@ -60,6 +60,37 @@ docker compose up -d
 # UI at http://localhost (frontend nginx), API at http://localhost/api
 ```
 
+## Rebuilding / updating
+
+After pulling new code (or making local changes), rebuild and restart with:
+
+```bash
+cd ludus-mgr
+
+# 1. Stop and remove the containers - NOT the data volume (no -v, ever)
+docker compose down
+
+# 2. Rebuild images from the current code and start the stack.
+#    The backend's lifespan handler runs `alembic upgrade head`
+#    automatically on startup, so pending migrations apply themselves.
+docker compose up -d --build
+
+# 3. Clean up the now-superseded old images (safe: only removes
+#    untagged/dangling images, never anything still in use).
+docker image prune -f
+```
+
+Verify it came back up healthy:
+
+```bash
+docker compose ps                    # all three services should show healthy/running
+curl -s http://localhost/health      # {"status":"ok","db":true,"storage":true,"ludus":true}
+```
+
+**Never append `-v`/`--volumes` to `docker compose down`** - that deletes the
+Postgres volume (`pgdata`), destroying every session, student, and lab
+template in the database.
+
 ## Connecting to Ludus
 
 Some Ludus deployments still expose **two** API ports, and this platform supports both:
