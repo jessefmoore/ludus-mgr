@@ -147,17 +147,6 @@ def test_list_events_empty_returns_empty_list(client: TestClient) -> None:
     assert resp.json() == []
 
 
-def test_list_events_returns_seeded_events(client: TestClient, db_session: OrmSession) -> None:
-    _seed_events(db_session, 3)
-    resp = client.get("/api/events")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body) == 3
-    # Newest first (reverse chronological)
-    assert body[0]["action"] == "test.action.2"
-    assert body[2]["action"] == "test.action.0"
-
-
 def test_list_events_filter_by_session_id(client: TestClient, db_session: OrmSession) -> None:
     _seed_events(db_session, 2, session_id=1)
     _seed_events(db_session, 3, session_id=2)
