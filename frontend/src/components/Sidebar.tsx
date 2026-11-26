@@ -18,7 +18,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/labs", icon: Layers, label: "Lab Templates" },
-  { to: "/ludus", icon: Server, label: "Ludus" },
+  { to: "/ludus", icon: Server, label: "Ludus Management" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 

@@ -23,7 +23,7 @@ interface PaletteItem {
 const NAV_ITEMS: Omit<PaletteItem, "action">[] = [
   { id: "nav-dashboard", icon: LayoutDashboard, label: "Dashboard", description: "Overview & stats", group: "Pages" },
   { id: "nav-labs", icon: Layers, label: "Lab Templates", description: "Manage lab configs", group: "Pages" },
-  { id: "nav-ludus", icon: Server, label: "Ludus", description: "Ranges, snapshots, templates", group: "Pages" },
+  { id: "nav-ludus", icon: Server, label: "Ludus Management", description: "Ranges, snapshots, templates", group: "Pages" },
   { id: "nav-settings", icon: Settings, label: "Settings", description: "Platform configuration", group: "Pages" },
 ];
 
