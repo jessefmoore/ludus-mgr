@@ -165,6 +165,8 @@ def get_session_quota(
     within_quota = (
         (row.cpu_quota is None or demand.cpus <= row.cpu_quota)
         and (row.ram_quota_gb is None or demand.ram_gb <= row.ram_quota_gb)
+        and (row.vm_quota is None or demand.vm_count <= row.vm_quota)
+        and (row.range_quota is None or demand.range_count <= row.range_quota)
     )
     return SessionQuotaRead(
         mode=row.mode,
@@ -172,12 +174,19 @@ def get_session_quota(
         ready_count=ready_count,
         per_range_cpus=per_range.cpus,
         per_range_ram_gb=per_range.ram_gb,
+        per_range_vms=per_range.vm_count,
         demand_cpus=demand.cpus,
         demand_ram_gb=demand.ram_gb,
+        demand_vms=demand.vm_count,
+        demand_ranges=demand.range_count,
         allocated_cpus=allocated.cpus,
         allocated_ram_gb=allocated.ram_gb,
+        allocated_vms=allocated.vm_count,
+        allocated_ranges=allocated.range_count,
         cpu_quota=row.cpu_quota,
         ram_quota_gb=row.ram_quota_gb,
+        vm_quota=row.vm_quota,
+        range_quota=row.range_quota,
         within_quota=within_quota,
     )
 
@@ -227,9 +236,10 @@ def patch_session(
 
     * ``shared_range_id`` may only be (re)bound while the session is ``draft``
       (a non-null value is validated against Ludus).
-    * ``cpu_quota`` / ``ram_quota_gb`` may be edited any time *except* after
-      the session has ``ended`` - so a lab manager can raise/lower a running
-      cohort's budget before provisioning more students.
+    * ``cpu_quota`` / ``ram_quota_gb`` / ``vm_quota`` / ``range_quota`` may be
+      edited any time *except* after the session has ``ended`` - so a lab
+      manager can raise/lower a running cohort's budget before provisioning
+      more students.
     """
     session_row = sessions_service.get_session(db, session_id)
     if session_row is None:
@@ -240,7 +250,9 @@ def patch_session(
 
     fields_set = payload.model_fields_set
     changing_range = "shared_range_id" in fields_set
-    changing_quota = "cpu_quota" in fields_set or "ram_quota_gb" in fields_set
+    changing_quota = bool(
+        fields_set & {"cpu_quota", "ram_quota_gb", "vm_quota", "range_quota"}
+    )
 
     if changing_range and session_row.status != SessionStatus.draft:
         raise HTTPException(
@@ -284,6 +296,10 @@ def patch_session(
         session_row.cpu_quota = payload.cpu_quota
     if "ram_quota_gb" in fields_set:
         session_row.ram_quota_gb = payload.ram_quota_gb
+    if "vm_quota" in fields_set:
+        session_row.vm_quota = payload.vm_quota
+    if "range_quota" in fields_set:
+        session_row.range_quota = payload.range_quota
     db.add(
         Event(
             session_id=session_row.id,
@@ -295,6 +311,8 @@ def patch_session(
                 "shared_range_id": session_row.shared_range_id,
                 "cpu_quota": session_row.cpu_quota,
                 "ram_quota_gb": session_row.ram_quota_gb,
+                "vm_quota": session_row.vm_quota,
+                "range_quota": session_row.range_quota,
             },
         )
     )

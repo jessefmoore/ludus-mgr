@@ -116,7 +116,7 @@ def test_allocation_sums_active_dedicated(db_session: OrmSession) -> None:
     _session(db_session, lab, mode=SessionMode.dedicated, status=SessionStatus.active, n_students=2)
     alloc = cap.compute_sessions_allocation(db_session, "default")
     # dedicated 2 students x (6 CPU / 12 GB) = 12 CPU / 24 GB.
-    assert alloc.resources == RangeResources(cpus=12, ram_gb=24, vm_count=4)
+    assert alloc.resources == RangeResources(cpus=12, ram_gb=24, vm_count=4, range_count=2)
     assert alloc.session_count == 1
 
 
@@ -132,14 +132,14 @@ def test_allocation_excludes_removed_ranges(db_session: OrmSession) -> None:
     db_session.commit()
     alloc = cap.compute_sessions_allocation(db_session, "default")
     # 2 deployed x 6 CPU / 12 GB = 12 / 24 (the removed one drops out).
-    assert alloc.resources == RangeResources(cpus=12, ram_gb=24, vm_count=4)
+    assert alloc.resources == RangeResources(cpus=12, ram_gb=24, vm_count=4, range_count=2)
 
 
 def test_allocation_shared_counts_one_range(db_session: OrmSession) -> None:
     lab = _lab(db_session)
     _session(db_session, lab, mode=SessionMode.shared, status=SessionStatus.active, n_students=10)
     alloc = cap.compute_sessions_allocation(db_session, "default")
-    assert alloc.resources == RangeResources(cpus=6, ram_gb=12, vm_count=2)
+    assert alloc.resources == RangeResources(cpus=6, ram_gb=12, vm_count=2, range_count=1)
 
 
 def test_allocation_excludes_draft_and_ended(db_session: OrmSession) -> None:
@@ -158,7 +158,7 @@ def test_allocation_includes_provisioning(db_session: OrmSession) -> None:
         status=SessionStatus.provisioning, n_students=1,
     )
     alloc = cap.compute_sessions_allocation(db_session, "default")
-    assert alloc.resources == RangeResources(cpus=6, ram_gb=12, vm_count=2)
+    assert alloc.resources == RangeResources(cpus=6, ram_gb=12, vm_count=2, range_count=1)
     assert alloc.session_count == 1
 
 

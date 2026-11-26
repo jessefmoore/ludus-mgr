@@ -513,6 +513,8 @@ function CreateSessionModal({
   const [endDate, setEndDate] = useState("");
   const [cpuQuota, setCpuQuota] = useState("");
   const [ramQuota, setRamQuota] = useState("");
+  const [vmQuota, setVmQuota] = useState("");
+  const [rangeQuota, setRangeQuota] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -557,6 +559,8 @@ function CreateSessionModal({
     setEndDate("");
     setCpuQuota("");
     setRamQuota("");
+    setVmQuota("");
+    setRangeQuota("");
     setError("");
   };
 
@@ -583,6 +587,8 @@ function CreateSessionModal({
         end_date: endDate ? new Date(endDate).toISOString() : null,
         cpu_quota: cpuQuota ? Number(cpuQuota) : null,
         ram_quota_gb: ramQuota ? Number(ramQuota) : null,
+        vm_quota: vmQuota ? Number(vmQuota) : null,
+        range_quota: rangeQuota ? Number(rangeQuota) : null,
       });
       reset();
       onCreated();
@@ -726,7 +732,7 @@ function CreateSessionModal({
           <label className="block text-[13px] uppercase tracking-wider text-text-secondary">
             Resource Quota <span className="text-text-muted normal-case">(optional — blank = unlimited)</span>
           </label>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <Input
               label="Max CPU cores"
               type="number"
@@ -742,6 +748,22 @@ function CreateSessionModal({
               placeholder="unlimited"
               value={ramQuota}
               onChange={(e) => setRamQuota(e.target.value)}
+            />
+            <Input
+              label="Max VMs"
+              type="number"
+              min={1}
+              placeholder="unlimited"
+              value={vmQuota}
+              onChange={(e) => setVmQuota(e.target.value)}
+            />
+            <Input
+              label="Max ranges"
+              type="number"
+              min={1}
+              placeholder="unlimited"
+              value={rangeQuota}
+              onChange={(e) => setRangeQuota(e.target.value)}
             />
           </div>
           <p className="text-[13px] text-text-muted">

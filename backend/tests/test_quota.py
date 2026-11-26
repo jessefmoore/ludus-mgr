@@ -64,14 +64,14 @@ TWO_VM_YAML = (
 
 def test_compute_range_resources_sums_vms() -> None:
     res = compute_range_resources(TWO_VM_YAML)
-    assert res == RangeResources(cpus=6, ram_gb=12, vm_count=2)
+    assert res == RangeResources(cpus=6, ram_gb=12, vm_count=2, range_count=1)
 
 
 def test_compute_range_resources_handles_missing_fields() -> None:
     yaml_text = "ludus:\n  - vm_name: a\n    cpus: 2\n  - vm_name: b\n    ram_gb: 4\n"
     res = compute_range_resources(yaml_text)
     # b has no cpus, a has no ram -> partial sums, both counted as VMs.
-    assert res == RangeResources(cpus=2, ram_gb=4, vm_count=2)
+    assert res == RangeResources(cpus=2, ram_gb=4, vm_count=2, range_count=1)
 
 
 def test_compute_range_resources_coerces_string_scalars() -> None:
@@ -172,6 +172,8 @@ def _session_with_students(
     n_students: int,
     cpu_quota: int | None = None,
     ram_quota_gb: int | None = None,
+    vm_quota: int | None = None,
+    range_quota: int | None = None,
 ) -> SessionRow:
     row = SessionRow(
         name="Cohort",
@@ -179,6 +181,8 @@ def _session_with_students(
         mode=mode,
         cpu_quota=cpu_quota,
         ram_quota_gb=ram_quota_gb,
+        vm_quota=vm_quota,
+        range_quota=range_quota,
         status=SessionStatus.draft,
     )
     db.add(row)
@@ -233,6 +237,39 @@ def test_check_quota_shared_counts_one_range(db_session: OrmSession) -> None:
     row = _session_with_students(
         db_session, lab, mode=SessionMode.shared, n_students=20,
         cpu_quota=6, ram_quota_gb=12,
+    )
+    provision_service.check_session_quota(row, lab)  # must not raise
+
+
+def test_check_quota_blocks_on_vm_count(db_session: OrmSession) -> None:
+    lab = _lab(db_session)
+    # dedicated, 3 students x 2 VMs/range = 6 VMs, over a quota of 4.
+    row = _session_with_students(
+        db_session, lab, mode=SessionMode.dedicated, n_students=3, vm_quota=4,
+    )
+    with pytest.raises(provision_service.QuotaExceeded) as exc:
+        provision_service.check_session_quota(row, lab)
+    assert exc.value.demand_vms == 6
+    assert exc.value.vm_quota == 4
+
+
+def test_check_quota_blocks_on_range_count(db_session: OrmSession) -> None:
+    lab = _lab(db_session)
+    # dedicated, 3 students -> 3 ranges, over a quota of 2.
+    row = _session_with_students(
+        db_session, lab, mode=SessionMode.dedicated, n_students=3, range_quota=2,
+    )
+    with pytest.raises(provision_service.QuotaExceeded) as exc:
+        provision_service.check_session_quota(row, lab)
+    assert exc.value.demand_ranges == 3
+    assert exc.value.range_quota == 2
+
+
+def test_check_quota_shared_range_quota_of_one_is_fine(db_session: OrmSession) -> None:
+    lab = _lab(db_session)
+    # shared mode always deploys exactly one range, regardless of headcount.
+    row = _session_with_students(
+        db_session, lab, mode=SessionMode.shared, n_students=50, range_quota=1,
     )
     provision_service.check_session_quota(row, lab)  # must not raise
 

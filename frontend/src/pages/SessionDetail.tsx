@@ -1032,16 +1032,22 @@ function QuotaEditor({
   sessionId,
   cpuQuota,
   ramQuota,
+  vmQuota,
+  rangeQuota,
   onDone,
 }: {
   sessionId: number;
   cpuQuota: number | null;
   ramQuota: number | null;
+  vmQuota: number | null;
+  rangeQuota: number | null;
   onDone: () => void;
 }) {
   const { toast } = useToast();
   const [cpu, setCpu] = useState(cpuQuota != null ? String(cpuQuota) : "");
   const [ram, setRam] = useState(ramQuota != null ? String(ramQuota) : "");
+  const [vms, setVms] = useState(vmQuota != null ? String(vmQuota) : "");
+  const [ranges, setRanges] = useState(rangeQuota != null ? String(rangeQuota) : "");
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -1050,6 +1056,8 @@ function QuotaEditor({
       await sessions.patch(sessionId, {
         cpu_quota: cpu ? Number(cpu) : null,
         ram_quota_gb: ram ? Number(ram) : null,
+        vm_quota: vms ? Number(vms) : null,
+        range_quota: ranges ? Number(ranges) : null,
       });
       toast("success", "Resource quota updated");
       onDone();
@@ -1083,6 +1091,22 @@ function QuotaEditor({
           value={ram}
           onChange={(e) => setRam(e.target.value)}
         />
+        <Input
+          label="Max VMs"
+          type="number"
+          min={1}
+          placeholder="unlimited"
+          value={vms}
+          onChange={(e) => setVms(e.target.value)}
+        />
+        <Input
+          label="Max ranges"
+          type="number"
+          min={1}
+          placeholder="unlimited"
+          value={ranges}
+          onChange={(e) => setRanges(e.target.value)}
+        />
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onDone} disabled={saving}>
@@ -1112,7 +1136,13 @@ function QuotaCard({
   // removed. The over-budget block still keys off the full planned footprint.
   const overCpu = quota.cpu_quota != null && quota.allocated_cpus > quota.cpu_quota;
   const overRam = quota.ram_quota_gb != null && quota.allocated_ram_gb > quota.ram_quota_gb;
-  const hasBudget = quota.cpu_quota != null || quota.ram_quota_gb != null;
+  const overVms = quota.vm_quota != null && quota.allocated_vms > quota.vm_quota;
+  const overRanges = quota.range_quota != null && quota.allocated_ranges > quota.range_quota;
+  const hasBudget =
+    quota.cpu_quota != null ||
+    quota.ram_quota_gb != null ||
+    quota.vm_quota != null ||
+    quota.range_quota != null;
   // Quota can be edited any time except after the session has ended.
   const canEdit = status !== "ended";
 
@@ -1128,13 +1158,13 @@ function QuotaCard({
         {editing ? (
           <span className="text-xs text-text-muted">
             {quota.ready_count}/{quota.student_count} deployed ·{" "}
-            {quota.per_range_cpus} CPU / {quota.per_range_ram_gb} GB per range
+            {quota.per_range_cpus} CPU / {quota.per_range_ram_gb} GB / {quota.per_range_vms} VM{quota.per_range_vms === 1 ? "" : "s"} per range
           </span>
         ) : (
           <div className="flex items-center gap-3">
             <span className="text-xs text-text-muted">
               {quota.student_count} student{quota.student_count === 1 ? "" : "s"} ·{" "}
-              {quota.per_range_cpus} CPU / {quota.per_range_ram_gb} GB per range
+              {quota.per_range_cpus} CPU / {quota.per_range_ram_gb} GB / {quota.per_range_vms} VM{quota.per_range_vms === 1 ? "" : "s"} per range
             </span>
             {canEdit && (
               <button
@@ -1155,6 +1185,8 @@ function QuotaCard({
           sessionId={sessionId}
           cpuQuota={quota.cpu_quota}
           ramQuota={quota.ram_quota_gb}
+          vmQuota={quota.vm_quota}
+          rangeQuota={quota.range_quota}
           onDone={() => {
             setEditing(false);
             onSaved();
@@ -1175,6 +1207,20 @@ function QuotaCard({
             quota={quota.ram_quota_gb}
             unit="GB"
             over={overRam}
+          />
+          <QuotaMeter
+            label="VMs"
+            allocated={quota.allocated_vms}
+            quota={quota.vm_quota}
+            unit="VMs"
+            over={overVms}
+          />
+          <QuotaMeter
+            label="Ranges"
+            allocated={quota.allocated_ranges}
+            quota={quota.range_quota}
+            unit="ranges"
+            over={overRanges}
           />
 
           {!quota.within_quota && (

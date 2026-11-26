@@ -65,20 +65,32 @@ class QuotaExceeded(Exception):  # noqa: N818 -- consistent with SessionNotFound
         *,
         demand_cpus: int,
         demand_ram_gb: int,
+        demand_vms: int,
+        demand_ranges: int,
         cpu_quota: int | None,
         ram_quota_gb: int | None,
+        vm_quota: int | None,
+        range_quota: int | None,
         student_count: int,
     ) -> None:
         self.demand_cpus = demand_cpus
         self.demand_ram_gb = demand_ram_gb
+        self.demand_vms = demand_vms
+        self.demand_ranges = demand_ranges
         self.cpu_quota = cpu_quota
         self.ram_quota_gb = ram_quota_gb
+        self.vm_quota = vm_quota
+        self.range_quota = range_quota
         self.student_count = student_count
         breaches = []
         if cpu_quota is not None and demand_cpus > cpu_quota:
             breaches.append(f"CPU {demand_cpus} > quota {cpu_quota}")
         if ram_quota_gb is not None and demand_ram_gb > ram_quota_gb:
             breaches.append(f"RAM {demand_ram_gb}GB > quota {ram_quota_gb}GB")
+        if vm_quota is not None and demand_vms > vm_quota:
+            breaches.append(f"VMs {demand_vms} > quota {vm_quota}")
+        if range_quota is not None and demand_ranges > range_quota:
+            breaches.append(f"ranges {demand_ranges} > quota {range_quota}")
         super().__init__(
             "Session resource demand exceeds its quota ("
             + "; ".join(breaches)
@@ -95,11 +107,13 @@ def check_session_quota(
     Demand is the session's *full* footprint (all enrolled students), not
     just the current provisioning batch, so a quota check is stable across
     repeated/partial provision passes. A ``None`` ceiling means unlimited on
-    that dimension. No-op when both ceilings are unset.
+    that dimension. No-op when every ceiling is unset.
     """
     cpu_quota = session_row.cpu_quota
     ram_quota_gb = session_row.ram_quota_gb
-    if cpu_quota is None and ram_quota_gb is None:
+    vm_quota = session_row.vm_quota
+    range_quota = session_row.range_quota
+    if cpu_quota is None and ram_quota_gb is None and vm_quota is None and range_quota is None:
         return
 
     per_range = compute_range_resources(lab_template.range_config_yaml)
@@ -108,12 +122,18 @@ def check_session_quota(
 
     over_cpu = cpu_quota is not None and demand.cpus > cpu_quota
     over_ram = ram_quota_gb is not None and demand.ram_gb > ram_quota_gb
-    if over_cpu or over_ram:
+    over_vms = vm_quota is not None and demand.vm_count > vm_quota
+    over_ranges = range_quota is not None and demand.range_count > range_quota
+    if over_cpu or over_ram or over_vms or over_ranges:
         raise QuotaExceeded(
             demand_cpus=demand.cpus,
             demand_ram_gb=demand.ram_gb,
+            demand_vms=demand.vm_count,
+            demand_ranges=demand.range_count,
             cpu_quota=cpu_quota,
             ram_quota_gb=ram_quota_gb,
+            vm_quota=vm_quota,
+            range_quota=range_quota,
             student_count=student_count,
         )
 

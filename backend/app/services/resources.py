@@ -1,9 +1,10 @@
-"""Compute the CPU/RAM footprint of a Ludus range config.
+"""Compute the CPU/RAM/VM/range footprint of a Ludus range config.
 
 The single source of truth for "how much does this cost". Every VM in a
 Ludus range config declares its own ``cpus`` and ``ram_gb``; the resource
-cost of a range is simply the sum across its ``ludus:`` VM list. Sessions
-then multiply that per-range cost by how many ranges they deploy:
+cost of a range is the sum across its ``ludus:`` VM list, plus the VM count
+and a fixed cost of 1 range. Sessions then multiply that per-range cost by
+how many ranges they deploy:
 
 * ``shared``    -> exactly one range is deployed (the lead student's), so
   the session demand equals the per-range cost regardless of headcount.
@@ -26,17 +27,25 @@ from app.models.session import SessionMode
 
 @dataclass(frozen=True)
 class RangeResources:
-    """Aggregate CPU/RAM/VM totals for a range (or a whole session)."""
+    """Aggregate CPU/RAM/VM/range totals for a range (or a whole session).
+
+    ``range_count`` is 1 for a single successfully-parsed range config (see
+    :func:`compute_range_resources`) and 0 for an empty/invalid one - scaling
+    it by a session's student count is what turns "cost of one range" into
+    "how many ranges does this session need".
+    """
 
     cpus: int = 0
     ram_gb: int = 0
     vm_count: int = 0
+    range_count: int = 0
 
     def __add__(self, other: RangeResources) -> RangeResources:
         return RangeResources(
             cpus=self.cpus + other.cpus,
             ram_gb=self.ram_gb + other.ram_gb,
             vm_count=self.vm_count + other.vm_count,
+            range_count=self.range_count + other.range_count,
         )
 
     def scaled(self, factor: int) -> RangeResources:
@@ -45,6 +54,7 @@ class RangeResources:
             cpus=self.cpus * factor,
             ram_gb=self.ram_gb * factor,
             vm_count=self.vm_count * factor,
+            range_count=self.range_count * factor,
         )
 
 
@@ -99,7 +109,10 @@ def compute_range_resources(range_config_yaml: str) -> RangeResources:
             ram_gb=_coerce_int(vm.get("ram_gb")),
             vm_count=1,
         )
-    return total
+    # This config describes exactly one range, regardless of its VM count.
+    return RangeResources(
+        cpus=total.cpus, ram_gb=total.ram_gb, vm_count=total.vm_count, range_count=1
+    )
 
 
 def compute_session_demand(

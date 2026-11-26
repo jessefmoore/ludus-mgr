@@ -34,10 +34,13 @@ class SessionCreate(BaseModel):
     # ``shared_range_id``). Enrolled as the first student so provisioning
     # deploys the shared range under them. None = auto-generate the owner.
     owner_userid: str | None = Field(default=None, pattern=r"^[A-Za-z0-9]{1,20}$")
-    # Provisioning budget for the whole session. None = unlimited. Enforced
-    # as a hard block at provision time (see app.services.resources).
+    # Provisioning budget for the whole session. None = unlimited on that
+    # dimension. Enforced as a hard block at provision time (see
+    # app.services.resources).
     cpu_quota: int | None = Field(default=None, ge=1)
     ram_quota_gb: int | None = Field(default=None, ge=1)
+    vm_quota: int | None = Field(default=None, ge=1)
+    range_quota: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _check_mode_range_consistency(self) -> "SessionCreate":
@@ -61,6 +64,8 @@ class SessionPatch(BaseModel):
     shared_range_id: str | None = None
     cpu_quota: int | None = Field(default=None, ge=1)
     ram_quota_gb: int | None = Field(default=None, ge=1)
+    vm_quota: int | None = Field(default=None, ge=1)
+    range_quota: int | None = Field(default=None, ge=1)
 
 
 class SessionRead(BaseModel):
@@ -77,6 +82,8 @@ class SessionRead(BaseModel):
     shared_range_id: str | None = None
     cpu_quota: int | None = None
     ram_quota_gb: int | None = None
+    vm_quota: int | None = None
+    range_quota: int | None = None
     status: SessionStatus
     created_at: datetime
 
@@ -106,16 +113,23 @@ class SessionQuotaRead(BaseModel):
     # Cost of a single deployed range (one student's worth).
     per_range_cpus: int
     per_range_ram_gb: int
+    per_range_vms: int = 0
     # Planned footprint once every enrolled student is provisioned (quota gate).
     demand_cpus: int
     demand_ram_gb: int
+    demand_vms: int = 0
+    demand_ranges: int = 0
     # Currently-allocated footprint (only deployed ranges) - drops when a range
     # is removed.
     allocated_cpus: int = 0
     allocated_ram_gb: int = 0
+    allocated_vms: int = 0
+    allocated_ranges: int = 0
     # Configured ceilings (None = unlimited).
     cpu_quota: int | None = None
     ram_quota_gb: int | None = None
+    vm_quota: int | None = None
+    range_quota: int | None = None
     within_quota: bool
 
 

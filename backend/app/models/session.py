@@ -47,11 +47,16 @@ class Session(Base):
         nullable=False,
     )
     shared_range_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Provisioning budget for this session. NULL = unlimited. Enforced as a
-    # hard block at provision time: the session's total CPU/RAM demand (see
-    # app.services.resources) may not exceed these ceilings.
+    # Provisioning budget for this session. NULL = unlimited on that
+    # dimension. Enforced as a hard block at provision time: the session's
+    # total CPU/RAM/VM/range demand (see app.services.resources) may not
+    # exceed these ceilings. These mirror (but are independent of) the RAM/
+    # CPU/VM-count/range-count dimensions Ludus Enterprise's own quota system
+    # governs - this app enforces its own regardless of Ludus edition.
     cpu_quota: Mapped[int | None] = mapped_column(nullable=True)
     ram_quota_gb: Mapped[int | None] = mapped_column(nullable=True)
+    vm_quota: Mapped[int | None] = mapped_column(nullable=True)
+    range_quota: Mapped[int | None] = mapped_column(nullable=True)
     status: Mapped[SessionStatus] = mapped_column(
         SAEnum(SessionStatus, name="session_status"),
         nullable=False,

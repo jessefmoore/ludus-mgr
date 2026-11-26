@@ -62,9 +62,11 @@ export interface SessionCreate {
   shared_range_id: string | null;
   // Shared mode: userID that owns a newly auto-created shared range.
   owner_userid?: string | null;
-  // Per-session provisioning budget. null = unlimited.
+  // Per-session provisioning budget. null = unlimited on that dimension.
   cpu_quota?: number | null;
   ram_quota_gb?: number | null;
+  vm_quota?: number | null;
+  range_quota?: number | null;
 }
 
 export interface SessionRead {
@@ -77,23 +79,32 @@ export interface SessionRead {
   shared_range_id: string | null;
   cpu_quota: number | null;
   ram_quota_gb: number | null;
+  vm_quota: number | null;
+  range_quota: number | null;
   status: SessionStatus;
   created_at: string;
 }
 
-// Computed CPU/RAM footprint of a session vs its configured budget.
+// Computed CPU/RAM/VM/range footprint of a session vs its configured budget.
 export interface SessionQuotaRead {
   mode: LabMode;
   student_count: number;
   ready_count: number;
   per_range_cpus: number;
   per_range_ram_gb: number;
+  per_range_vms: number;
   demand_cpus: number;
   demand_ram_gb: number;
+  demand_vms: number;
+  demand_ranges: number;
   allocated_cpus: number;
   allocated_ram_gb: number;
+  allocated_vms: number;
+  allocated_ranges: number;
   cpu_quota: number | null;
   ram_quota_gb: number | null;
+  vm_quota: number | null;
+  range_quota: number | null;
   within_quota: boolean;
 }
 
@@ -522,6 +533,8 @@ export interface SessionPatch {
   shared_range_id?: string | null;
   cpu_quota?: number | null;
   ram_quota_gb?: number | null;
+  vm_quota?: number | null;
+  range_quota?: number | null;
 }
 
 // Events (audit log)

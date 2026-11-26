@@ -96,6 +96,8 @@ def create_session(db: DBSession, payload: SessionCreate) -> SessionRow:
         shared_range_id=payload.shared_range_id,
         cpu_quota=payload.cpu_quota,
         ram_quota_gb=payload.ram_quota_gb,
+        vm_quota=payload.vm_quota,
+        range_quota=payload.range_quota,
         status=SessionStatus.draft,
     )
     db.add(session_row)
