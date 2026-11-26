@@ -41,15 +41,7 @@ def fake_admin() -> User:
 
 @pytest.fixture
 def mock_ludus() -> MagicMock:
-    m = MagicMock(spec=LudusClient)
-    # Ludus v1 keys ranges by userID; routes that take a numeric range_number
-    # resolve it to the owning userID via range_list(). Provide a default map
-    # so those routes can resolve during tests.
-    m.range_list.return_value = [
-        {"rangeNumber": 1, "userID": "alice"},
-        {"rangeNumber": 999, "userID": "ghost"},
-    ]
-    return m
+    return MagicMock(spec=LudusClient)
 
 
 class _MockRegistry:
@@ -126,7 +118,7 @@ def test_list_ranges_without_auth_returns_401(anon_client: TestClient) -> None:
 
 
 def test_get_config_without_auth_returns_401(anon_client: TestClient) -> None:
-    resp = anon_client.get("/api/ludus/ranges/1/config")
+    resp = anon_client.get("/api/ludus/ranges/alice/config")
     assert resp.status_code == 401
 
 
@@ -175,7 +167,7 @@ def test_list_ranges_ludus_error_returns_502(client: TestClient, mock_ludus: Mag
 
 
 # ---------------------------------------------------------------------------
-# GET /api/ludus/ranges/{user_id}/config
+# GET /api/ludus/ranges/{range_id}/config
 # ---------------------------------------------------------------------------
 
 
@@ -185,18 +177,18 @@ RANGE_YAML = "ludus:\n  - vm_name: test\n"
 def test_get_range_config_success(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_get_config.return_value = RANGE_YAML
 
-    resp = client.get("/api/ludus/ranges/1/config")
+    resp = client.get("/api/ludus/ranges/alice/config")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["range_number"] == 1
+    assert body["range_id"] == "alice"
     assert body["config_yaml"] == RANGE_YAML
-    mock_ludus.range_get_config.assert_called_once_with(user_id="alice")
+    mock_ludus.range_get_config.assert_called_once_with(range_id="alice")
 
 
 def test_get_range_config_not_found_returns_404(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_get_config.side_effect = LudusNotFound("range not found", status_code=404)
 
-    resp = client.get("/api/ludus/ranges/999/config")
+    resp = client.get("/api/ludus/ranges/ghost/config")
     assert resp.status_code == 404
     assert "not found" in resp.json()["detail"].lower()
 
@@ -206,7 +198,7 @@ def test_get_range_config_ludus_error_returns_502(
 ) -> None:
     mock_ludus.range_get_config.side_effect = LudusError("internal error", status_code=500)
 
-    resp = client.get("/api/ludus/ranges/1/config")
+    resp = client.get("/api/ludus/ranges/alice/config")
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
 
@@ -244,62 +236,62 @@ def test_list_users_without_auth_returns_401(anon_client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /api/ludus/ranges/{range_number}/deploy
+# POST /api/ludus/ranges/{range_id}/deploy
 # ---------------------------------------------------------------------------
 
 
 def test_deploy_range_success(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_deploy_existing.return_value = None
 
-    resp = client.post("/api/ludus/ranges/1/deploy", json={"user_id": "RZ"})
+    resp = client.post("/api/ludus/ranges/RZ/deploy", json={})
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert body["detail"] == "Deployment started"
-    mock_ludus.range_deploy_existing.assert_called_once_with(user_id="RZ")
+    mock_ludus.range_deploy_existing.assert_called_once_with(range_id="RZ", user_id=None)
 
 
 def test_deploy_range_not_found_returns_404(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_deploy_existing.side_effect = LudusNotFound("range not found", status_code=404)
 
-    resp = client.post("/api/ludus/ranges/999/deploy", json={"user_id": "RZ"})
+    resp = client.post("/api/ludus/ranges/ghost/deploy", json={})
     assert resp.status_code == 404
 
 
 def test_deploy_range_ludus_error_returns_502(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_deploy_existing.side_effect = LudusError("internal error", status_code=500)
 
-    resp = client.post("/api/ludus/ranges/1/deploy", json={"user_id": "RZ"})
+    resp = client.post("/api/ludus/ranges/RZ/deploy", json={})
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
-# DELETE /api/ludus/ranges/{range_number}
+# DELETE /api/ludus/ranges/{range_id}
 # ---------------------------------------------------------------------------
 
 
 def test_destroy_range_success(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_destroy.return_value = None
 
-    resp = client.delete("/api/ludus/ranges/1")
+    resp = client.delete("/api/ludus/ranges/alice")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert body["detail"] == "Range destroyed"
-    mock_ludus.range_destroy.assert_called_once_with(user_id="alice", force=False)
+    mock_ludus.range_destroy.assert_called_once_with(range_id="alice", user_id=None, force=False)
 
 
 def test_destroy_range_not_found_returns_404(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_destroy.side_effect = LudusNotFound("range not found", status_code=404)
 
-    resp = client.delete("/api/ludus/ranges/999")
+    resp = client.delete("/api/ludus/ranges/ghost")
     assert resp.status_code == 404
 
 
 def test_destroy_range_ludus_error_returns_502(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_destroy.side_effect = LudusError("internal error", status_code=500)
 
-    resp = client.delete("/api/ludus/ranges/1")
+    resp = client.delete("/api/ludus/ranges/alice")
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]

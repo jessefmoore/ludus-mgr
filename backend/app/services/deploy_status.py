@@ -61,7 +61,7 @@ class DeployStatusResult:
 def _range_state(ludus: LudusClient, userid: str) -> str | None:
     """Return the uppercased ``rangeState`` for *userid*, or None on error."""
     try:
-        info = ludus.range_get_vms(user_id=userid)
+        info = ludus.range_get_vms(range_id=userid)
     except LudusError:
         return None
     return str(info.get("rangeState") or "").upper()

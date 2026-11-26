@@ -158,7 +158,6 @@ export default function LudusManagement() {
 function RangesTab({ server }: { server: string }) {
   const { toast } = useToast();
   const [ranges, setRanges] = useState<LudusRange[]>([]);
-  const [rangeToUser, setRangeToUser] = useState<Map<number, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [activeOps, setActiveOps] = useState<Map<number, string>>(new Map());
   const pollCountRef = useRef<Map<number, number>>(new Map());
@@ -183,20 +182,6 @@ function RangesTab({ server }: { server: string }) {
           (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
         );
         setRanges(filtered);
-        // Fetch owner userID for each range via range_users endpoint
-        const ownerResults = await Promise.all(
-          filtered.map((r) =>
-            ludus
-              .rangeUsers(r.rangeID, server)
-              .then((res) => [r.rangeNumber, res.users[0]?.userID] as const)
-              .catch(() => [r.rangeNumber, undefined] as const),
-          ),
-        );
-        const mapping = new Map<number, string>();
-        for (const [num, uid] of ownerResults) {
-          if (uid) mapping.set(num, uid);
-        }
-        setRangeToUser(mapping);
         // Auto-detect in-progress operations from range state
         const detected = new Map<number, string>();
         for (const r of filtered) {
@@ -304,16 +289,9 @@ function RangesTab({ server }: { server: string }) {
     return () => clearInterval(interval);
   }, [activeOps.size, server, toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const getUserId = (range: LudusRange): string | undefined => rangeToUser.get(range.rangeNumber);
-
   const handlePowerOn = (range: LudusRange) => {
-    const uid = getUserId(range);
-    if (!uid) {
-      toast("error", `Cannot power on range ${range.rangeNumber}: owner user not found`);
-      return;
-    }
     ludus
-      .powerOn(range.rangeNumber, { user_id: uid, range_id: range.rangeID }, server)
+      .powerOn(range.rangeID, { range_id: range.rangeID }, server)
       .then(() => {
         toast("success", `Power on initiated for range ${range.rangeNumber}`);
         addOp(range.rangeNumber, "POWERING ON");
@@ -322,16 +300,11 @@ function RangesTab({ server }: { server: string }) {
   };
 
   const handlePowerOff = (range: LudusRange) => {
-    const uid = getUserId(range);
-    if (!uid) {
-      toast("error", `Cannot power off range ${range.rangeNumber}: owner user not found`);
-      return;
-    }
     setConfirmModal({
       title: "Power Off Range",
       message: `This will power off ${range.numberOfVMs ?? "all"} VMs in range ${range.rangeNumber} (${range.name || range.rangeID}).`,
       action: async () => {
-        await ludus.powerOff(range.rangeNumber, { user_id: uid, range_id: range.rangeID }, server);
+        await ludus.powerOff(range.rangeID, { range_id: range.rangeID }, server);
         toast("success", `Power off initiated for range ${range.rangeNumber}`);
         addOp(range.rangeNumber, "POWERING OFF");
       },
@@ -339,16 +312,11 @@ function RangesTab({ server }: { server: string }) {
   };
 
   const handleDeploy = (range: LudusRange) => {
-    const uid = getUserId(range);
-    if (!uid) {
-      toast("error", `Cannot deploy range ${range.rangeNumber}: owner user not found`);
-      return;
-    }
     setConfirmModal({
       title: "Deploy Range",
       message: `This will deploy range ${range.rangeNumber} (${range.name || range.rangeID}). Existing VMs will be rebuilt.`,
       action: async () => {
-        await ludus.deployRange(range.rangeNumber, { user_id: uid }, server);
+        await ludus.deployRange(range.rangeID, {}, server);
         toast("success", `Deploy started for range ${range.rangeNumber}`);
         addOp(range.rangeNumber, "DEPLOYING");
       },
@@ -360,7 +328,7 @@ function RangesTab({ server }: { server: string }) {
       title: "Destroy Range",
       message: `This will destroy ${range.numberOfVMs ?? "all"} VMs in range ${range.rangeNumber} (${range.name || range.rangeID}). This action cannot be undone.`,
       action: async () => {
-        await ludus.destroyRange(range.rangeNumber, server, true, undefined, range.rangeID);
+        await ludus.destroyRange(range.rangeID, server, true);
         toast("success", `Destroy started for range ${range.rangeNumber}`);
         addOp(range.rangeNumber, "DESTROYING");
       },
@@ -504,7 +472,6 @@ function RangesTab({ server }: { server: string }) {
 function SnapshotsTab({ server }: { server: string }) {
   const { toast } = useToast();
   const [deployedRanges, setDeployedRanges] = useState<LudusRange[]>([]);
-  const [rangeToUser, setRangeToUser] = useState<Map<number, string>>(new Map());
   const [selectedRange, setSelectedRange] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState<LudusSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -524,25 +491,11 @@ function SnapshotsTab({ server }: { server: string }) {
     setLoading(true);
     ludus
       .ranges(server)
-      .then(async (rangesRes) => {
+      .then((rangesRes) => {
         const realRanges = rangesRes.ranges.filter(
           (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
         );
         setDeployedRanges(realRanges);
-        // Build range number -> owner userID mapping via range_users endpoint
-        const ownerResults = await Promise.all(
-          realRanges.map((r) =>
-            ludus
-              .rangeUsers(r.rangeID, server)
-              .then((res) => [r.rangeNumber, res.users[0]?.userID] as const)
-              .catch(() => [r.rangeNumber, undefined] as const),
-          ),
-        );
-        const mapping = new Map<number, string>();
-        for (const [num, uid] of ownerResults) {
-          if (uid) mapping.set(num, uid);
-        }
-        setRangeToUser(mapping);
         if (realRanges.length > 0) {
           setSelectedRange(realRanges[0].rangeNumber);
         }
@@ -551,25 +504,18 @@ function SnapshotsTab({ server }: { server: string }) {
       .finally(() => setLoading(false));
   }, [server]);
 
-  const getSelectedUserId = (): string => {
-    if (selectedRange == null) return "";
-    const fromMapping = rangeToUser.get(selectedRange);
-    if (fromMapping) return fromMapping;
-    return "";
-  };
   const getSelectedRangeId = (): string => {
     if (selectedRange == null) return "";
     const range = deployedRanges.find((r) => r.rangeNumber === selectedRange);
     return range?.rangeID ?? "";
   };
-  const selectedUserId = getSelectedUserId();
   const selectedRangeId = getSelectedRangeId();
 
   const fetchSnapshots = useCallback(() => {
-    if (!selectedUserId) return;
+    if (!selectedRangeId) return;
     setSnapshotLoading(true);
     ludus
-      .snapshots({ user_id: selectedUserId, range_id: selectedRangeId || undefined, server })
+      .snapshots({ range_id: selectedRangeId, server })
       .then((res) => setSnapshots(res.snapshots))
       .catch((err) =>
         toast("error", err instanceof ApiError ? err.detail : "Failed to load snapshots", {
@@ -578,17 +524,17 @@ function SnapshotsTab({ server }: { server: string }) {
         }),
       )
       .finally(() => setSnapshotLoading(false));
-  }, [selectedUserId, selectedRangeId, toast, server]);
+  }, [selectedRangeId, toast, server]);
 
   useEffect(fetchSnapshots, [fetchSnapshots]);
 
   // Poll while a snapshot operation is active
   useEffect(() => {
-    if (!activeSnapshotOp || !selectedUserId) return;
+    if (!activeSnapshotOp || !selectedRangeId) return;
 
     const interval = setInterval(() => {
       ludus
-        .snapshots({ user_id: selectedUserId, range_id: selectedRangeId || undefined, server })
+        .snapshots({ range_id: selectedRangeId, server })
         .then((res) => {
           const newCount = res.snapshots.length;
 
@@ -613,14 +559,14 @@ function SnapshotsTab({ server }: { server: string }) {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [activeSnapshotOp, selectedUserId, selectedRangeId, server, toast]);
+  }, [activeSnapshotOp, selectedRangeId, server, toast]);
 
   const handleRevert = (snap: LudusSnapshot) => {
     setConfirmModal({
       title: "Revert Snapshot",
       message: `Revert to snapshot "${snap.name}" on range ${selectedRange}?`,
       action: async () => {
-        await ludus.revertSnapshot({ user_id: selectedUserId, name: snap.name, range_id: selectedRangeId || undefined }, server);
+        await ludus.revertSnapshot({ name: snap.name, range_id: selectedRangeId }, server);
         toast("success", `Revert to "${snap.name}" started`);
         snapshotBaselineRef.current = snapshots.length;
         snapshotPollCountRef.current = 0;
@@ -634,7 +580,7 @@ function SnapshotsTab({ server }: { server: string }) {
       title: "Delete Snapshot",
       message: `Delete snapshot "${snap.name}"? This cannot be undone.`,
       action: async () => {
-        await ludus.deleteSnapshot(snap.name, selectedUserId, selectedRangeId || undefined, server);
+        await ludus.deleteSnapshot(snap.name, { range_id: selectedRangeId }, server);
         toast("success", `Snapshot "${snap.name}" deletion started`);
         snapshotBaselineRef.current = snapshots.length;
         snapshotPollCountRef.current = 0;
@@ -718,7 +664,7 @@ function SnapshotsTab({ server }: { server: string }) {
           variant="primary"
           icon={<Camera />}
           onClick={() => setShowCreate(true)}
-          disabled={!selectedUserId || opBusy}
+          disabled={!selectedRangeId || opBusy}
         >
           Create Snapshot
         </Button>
@@ -757,7 +703,6 @@ function SnapshotsTab({ server }: { server: string }) {
       <CreateSnapshotModal
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        userId={selectedUserId}
         rangeId={selectedRangeId}
         server={server}
         onCreated={() => {
@@ -791,14 +736,12 @@ function SnapshotsTab({ server }: { server: string }) {
 function CreateSnapshotModal({
   open,
   onClose,
-  userId,
   rangeId,
   server,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
-  userId: string;
   rangeId: string;
   server: string;
   onCreated: () => void;
@@ -825,7 +768,6 @@ function CreateSnapshotModal({
     setSaving(true);
     try {
       await ludus.createSnapshot({
-        user_id: userId,
         name,
         description,
         include_ram: includeRam,
@@ -1770,7 +1712,11 @@ function GroupsTab({ server }: { server: string }) {
   const handleAddUsers = async (userIds: string[], asManagers: boolean) => {
     if (!selectedGroup || userIds.length === 0) return;
     try {
-      await ludusGroups.addUsers(selectedGroup, { user_ids: userIds, managers: asManagers }, server);
+      await ludusGroups.addUsers(
+        selectedGroup,
+        { user_ids: userIds, managers: asManagers ? userIds : undefined },
+        server,
+      );
       toast("success", `${userIds.length} user(s) added to "${selectedGroup}"`);
       setShowAddUser(false);
       fetchGroupUsers(selectedGroup);
@@ -2292,7 +2238,7 @@ function TestingTab({ server }: { server: string }) {
     if (selectedRangeNum == null) return;
     try {
       await ludusTesting.start(
-        { range_id: selectedRangeNum, user_id: selectedRange?.rangeID },
+        { range_id: selectedRange?.rangeID },
         server,
       );
       toast("success", "Testing mode started");
@@ -2305,7 +2251,7 @@ function TestingTab({ server }: { server: string }) {
     if (selectedRangeNum == null) return;
     try {
       await ludusTesting.stop(
-        { range_id: selectedRangeNum, user_id: selectedRange?.rangeID },
+        { range_id: selectedRange?.rangeID },
         server,
       );
       toast("success", "Testing mode stopped");
@@ -2321,7 +2267,7 @@ function TestingTab({ server }: { server: string }) {
     if (!domains && !ips) return;
     try {
       await ludusTesting.allow(
-        { range_id: selectedRangeNum, user_id: selectedRange?.rangeID, domains, ips },
+        { range_id: selectedRange?.rangeID, domains, ips },
         server,
       );
       toast("success", "Allow rule added");
@@ -2339,7 +2285,7 @@ function TestingTab({ server }: { server: string }) {
     if (!domains && !ips) return;
     try {
       await ludusTesting.deny(
-        { range_id: selectedRangeNum, user_id: selectedRange?.rangeID, domains, ips },
+        { range_id: selectedRange?.rangeID, domains, ips },
         server,
       );
       toast("success", "Deny rule added");
@@ -2421,7 +2367,6 @@ function TestingTab({ server }: { server: string }) {
 function LogsTab({ server }: { server: string }) {
   const { toast } = useToast();
   const [ranges, setRanges] = useState<LudusRange[]>([]);
-  const [rangeToUser, setRangeToUser] = useState<Map<number, string>>(new Map());
   const [selectedRangeNum, setSelectedRangeNum] = useState<number | null>(null);
   const [logContent, setLogContent] = useState("");
   const [loading, setLoading] = useState(true);
@@ -2431,25 +2376,11 @@ function LogsTab({ server }: { server: string }) {
     setLoading(true);
     ludus
       .ranges(server)
-      .then(async (rangesRes) => {
+      .then((rangesRes) => {
         const realRanges = rangesRes.ranges.filter(
           (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
         );
         setRanges(realRanges);
-        // Build range number -> owner userID mapping via range_users endpoint
-        const ownerResults = await Promise.all(
-          realRanges.map((r) =>
-            ludus
-              .rangeUsers(r.rangeID, server)
-              .then((res) => [r.rangeNumber, res.users[0]?.userID] as const)
-              .catch(() => [r.rangeNumber, undefined] as const),
-          ),
-        );
-        const mapping = new Map<number, string>();
-        for (const [num, uid] of ownerResults) {
-          if (uid) mapping.set(num, uid);
-        }
-        setRangeToUser(mapping);
         if (realRanges.length > 0) {
           setSelectedRangeNum(realRanges[0].rangeNumber);
         }
@@ -2461,10 +2392,9 @@ function LogsTab({ server }: { server: string }) {
   const fetchLogs = useCallback(() => {
     if (selectedRangeNum == null) return;
     setLogsLoading(true);
-    const userId = rangeToUser.get(selectedRangeNum);
     const rangeObj = ranges.find((r) => r.rangeNumber === selectedRangeNum);
     ludus
-      .rangeLogs({ range_id: selectedRangeNum, user_id: userId, range_str_id: rangeObj?.rangeID, server })
+      .rangeLogs({ range_id: rangeObj?.rangeID, server })
       .then((res) => setLogContent(res.result || ""))
       .catch((err) =>
         toast("error", err instanceof ApiError ? err.detail : "Failed to load logs", {
@@ -2473,7 +2403,7 @@ function LogsTab({ server }: { server: string }) {
         }),
       )
       .finally(() => setLogsLoading(false));
-  }, [selectedRangeNum, rangeToUser, ranges, toast, server]);
+  }, [selectedRangeNum, ranges, toast, server]);
 
   useEffect(fetchLogs, [fetchLogs]);
 

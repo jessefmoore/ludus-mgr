@@ -30,10 +30,10 @@ class FakeLudus:
         self.user_rm_calls: list[str] = []
         self.error: Exception | None = None
 
-    def range_destroy(self, *, user_id: str | None = None, force: bool = False) -> None:
+    def range_destroy(self, *, range_id: str | None = None, force: bool = False) -> None:
         if self.error is not None:
             raise self.error
-        self.range_destroy_calls.append(user_id or "")
+        self.range_destroy_calls.append(range_id or "")
 
     def user_rm(self, userid: str) -> None:  # must NOT be called
         self.user_rm_calls.append(userid)

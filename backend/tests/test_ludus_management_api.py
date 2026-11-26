@@ -108,7 +108,7 @@ def anon_client(
 
 
 # ---------------------------------------------------------------------------
-# POST /api/ludus/ranges/{range_number}/power-on
+# POST /api/ludus/ranges/{range_id}/power-on
 # ---------------------------------------------------------------------------
 
 
@@ -116,33 +116,37 @@ def test_power_on_success(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_power_on.return_value = None
 
     resp = client.post(
-        "/api/ludus/ranges/1/power-on",
-        json={"user_id": "alice", "machines": ["all"]},
+        "/api/ludus/ranges/alice/power-on",
+        json={"machines": ["all"]},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert body["detail"] == "Power on initiated"
-    mock_ludus.range_power_on.assert_called_once_with("alice", machines=["all"])
+    mock_ludus.range_power_on.assert_called_once_with(
+        range_id="alice", user_id=None, machines=["all"]
+    )
 
 
 def test_power_on_specific_machines(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_power_on.return_value = None
 
     resp = client.post(
-        "/api/ludus/ranges/1/power-on",
-        json={"user_id": "alice", "machines": ["web", "db"]},
+        "/api/ludus/ranges/alice/power-on",
+        json={"machines": ["web", "db"]},
     )
     assert resp.status_code == 200
-    mock_ludus.range_power_on.assert_called_once_with("alice", machines=["web", "db"])
+    mock_ludus.range_power_on.assert_called_once_with(
+        range_id="alice", user_id=None, machines=["web", "db"]
+    )
 
 
 def test_power_on_not_found_returns_404(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_power_on.side_effect = LudusNotFound("not found", status_code=404)
 
     resp = client.post(
-        "/api/ludus/ranges/999/power-on",
-        json={"user_id": "ghost"},
+        "/api/ludus/ranges/ghost/power-on",
+        json={},
     )
     assert resp.status_code == 404
 
@@ -151,8 +155,8 @@ def test_power_on_ludus_error_returns_502(client: TestClient, mock_ludus: MagicM
     mock_ludus.range_power_on.side_effect = LudusError("internal", status_code=500)
 
     resp = client.post(
-        "/api/ludus/ranges/1/power-on",
-        json={"user_id": "alice"},
+        "/api/ludus/ranges/alice/power-on",
+        json={},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -160,14 +164,14 @@ def test_power_on_ludus_error_returns_502(client: TestClient, mock_ludus: MagicM
 
 def test_power_on_without_auth_returns_401(anon_client: TestClient) -> None:
     resp = anon_client.post(
-        "/api/ludus/ranges/1/power-on",
-        json={"user_id": "alice"},
+        "/api/ludus/ranges/alice/power-on",
+        json={},
     )
     assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
-# POST /api/ludus/ranges/{range_number}/power-off
+# POST /api/ludus/ranges/{range_id}/power-off
 # ---------------------------------------------------------------------------
 
 
@@ -175,8 +179,8 @@ def test_power_off_success(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.range_power_off.return_value = None
 
     resp = client.post(
-        "/api/ludus/ranges/1/power-off",
-        json={"user_id": "alice"},
+        "/api/ludus/ranges/alice/power-off",
+        json={},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -188,8 +192,8 @@ def test_power_off_not_found_returns_404(client: TestClient, mock_ludus: MagicMo
     mock_ludus.range_power_off.side_effect = LudusNotFound("not found", status_code=404)
 
     resp = client.post(
-        "/api/ludus/ranges/999/power-off",
-        json={"user_id": "ghost"},
+        "/api/ludus/ranges/ghost/power-off",
+        json={},
     )
     assert resp.status_code == 404
 
@@ -205,12 +209,13 @@ def test_list_snapshots_success(client: TestClient, mock_ludus: MagicMock) -> No
         {"name": "checkpoint-1", "description": "After setup"},
     ]
 
-    resp = client.get("/api/ludus/snapshots", params={"user_id": "alice"})
+    resp = client.get("/api/ludus/snapshots", params={"range_id": "alice"})
     assert resp.status_code == 200
     body = resp.json()
     assert "snapshots" in body
     assert len(body["snapshots"]) == 2
     assert body["snapshots"][0]["name"] == "ctf-initial"
+    mock_ludus.snapshot_list.assert_called_once_with(range_id="alice", user_id=None)
 
 
 def test_list_snapshots_nested_ludus_format(client: TestClient, mock_ludus: MagicMock) -> None:
@@ -228,7 +233,7 @@ def test_list_snapshots_nested_ludus_format(client: TestClient, mock_ludus: Magi
         },
     ]
 
-    resp = client.get("/api/ludus/snapshots", params={"user_id": "RZ"})
+    resp = client.get("/api/ludus/snapshots", params={"range_id": "RZ"})
     assert resp.status_code == 200
     body = resp.json()
     snapshots = body["snapshots"]
@@ -248,9 +253,9 @@ def test_list_snapshots_empty(client: TestClient, mock_ludus: MagicMock) -> None
 
 
 def test_list_snapshots_not_found_returns_404(client: TestClient, mock_ludus: MagicMock) -> None:
-    mock_ludus.snapshot_list.side_effect = LudusNotFound("user not found", status_code=404)
+    mock_ludus.snapshot_list.side_effect = LudusNotFound("range not found", status_code=404)
 
-    resp = client.get("/api/ludus/snapshots", params={"user_id": "ghost"})
+    resp = client.get("/api/ludus/snapshots", params={"range_id": "ghost"})
     assert resp.status_code == 404
 
 
@@ -276,7 +281,7 @@ def test_create_snapshot_success(client: TestClient, mock_ludus: MagicMock) -> N
 
     resp = client.post(
         "/api/ludus/snapshots",
-        json={"user_id": "alice", "name": "my-snap", "description": "test"},
+        json={"range_id": "alice", "name": "my-snap", "description": "test"},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -284,7 +289,8 @@ def test_create_snapshot_success(client: TestClient, mock_ludus: MagicMock) -> N
     assert body["detail"] == "Snapshot creation started"
     mock_ludus.snapshot_create.assert_called_once_with(
         "my-snap",
-        user_id="alice",
+        range_id="alice",
+        user_id=None,
         description="test",
         include_ram=False,
         vmids=None,
@@ -292,11 +298,11 @@ def test_create_snapshot_success(client: TestClient, mock_ludus: MagicMock) -> N
 
 
 def test_create_snapshot_not_found_returns_404(client: TestClient, mock_ludus: MagicMock) -> None:
-    mock_ludus.snapshot_create.side_effect = LudusNotFound("user not found", status_code=404)
+    mock_ludus.snapshot_create.side_effect = LudusNotFound("range not found", status_code=404)
 
     resp = client.post(
         "/api/ludus/snapshots",
-        json={"user_id": "ghost", "name": "snap1"},
+        json={"range_id": "ghost", "name": "snap1"},
     )
     assert resp.status_code == 404
 
@@ -306,7 +312,7 @@ def test_create_snapshot_auth_error_returns_502(client: TestClient, mock_ludus: 
 
     resp = client.post(
         "/api/ludus/snapshots",
-        json={"user_id": "alice", "name": "snap1"},
+        json={"range_id": "alice", "name": "snap1"},
     )
     assert resp.status_code == 502
 
@@ -321,13 +327,13 @@ def test_revert_snapshot_success(client: TestClient, mock_ludus: MagicMock) -> N
 
     resp = client.post(
         "/api/ludus/snapshots/revert",
-        json={"user_id": "alice", "name": "ctf-initial"},
+        json={"range_id": "alice", "name": "ctf-initial"},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     mock_ludus.snapshot_revert.assert_called_once_with(
-        "ctf-initial", user_id="alice", vmids=None,
+        "ctf-initial", range_id="alice", user_id=None, vmids=None,
     )
 
 
@@ -336,11 +342,11 @@ def test_revert_snapshot_with_vmids(client: TestClient, mock_ludus: MagicMock) -
 
     resp = client.post(
         "/api/ludus/snapshots/revert",
-        json={"user_id": "alice", "name": "ctf-initial", "vmids": [100, 101]},
+        json={"range_id": "alice", "name": "ctf-initial", "vmids": [100, 101]},
     )
     assert resp.status_code == 200
     mock_ludus.snapshot_revert.assert_called_once_with(
-        "ctf-initial", user_id="alice", vmids=[100, 101],
+        "ctf-initial", range_id="alice", user_id=None, vmids=[100, 101],
     )
 
 
@@ -351,7 +357,7 @@ def test_revert_snapshot_not_found_returns_404(
 
     resp = client.post(
         "/api/ludus/snapshots/revert",
-        json={"user_id": "alice", "name": "nope"},
+        json={"range_id": "alice", "name": "nope"},
     )
     assert resp.status_code == 404
 
@@ -364,11 +370,11 @@ def test_revert_snapshot_not_found_returns_404(
 def test_delete_snapshot_success(client: TestClient, mock_ludus: MagicMock) -> None:
     mock_ludus.snapshot_delete.return_value = None
 
-    resp = client.delete("/api/ludus/snapshots/old-snap", params={"user_id": "alice"})
+    resp = client.delete("/api/ludus/snapshots/old-snap", params={"range_id": "alice"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    mock_ludus.snapshot_delete.assert_called_once_with("old-snap", user_id="alice")
+    mock_ludus.snapshot_delete.assert_called_once_with("old-snap", range_id="alice", user_id=None)
 
 
 def test_delete_snapshot_not_found_returns_404(
@@ -376,7 +382,7 @@ def test_delete_snapshot_not_found_returns_404(
 ) -> None:
     mock_ludus.snapshot_delete.side_effect = LudusNotFound("not found", status_code=404)
 
-    resp = client.delete("/api/ludus/snapshots/nope", params={"user_id": "alice"})
+    resp = client.delete("/api/ludus/snapshots/nope", params={"range_id": "alice"})
     assert resp.status_code == 404
 
 
@@ -385,7 +391,7 @@ def test_delete_snapshot_ludus_error_returns_502(
 ) -> None:
     mock_ludus.snapshot_delete.side_effect = LudusError("internal", status_code=500)
 
-    resp = client.delete("/api/ludus/snapshots/old-snap", params={"user_id": "alice"})
+    resp = client.delete("/api/ludus/snapshots/old-snap", params={"range_id": "alice"})
     assert resp.status_code == 502
 
 

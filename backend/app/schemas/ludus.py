@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class LudusRange(BaseModel):
     """A single range reported by Ludus.
 
-    On Ludus v1 a range is owned by a user and identified by ``userID`` +
-    ``rangeNumber`` (there is no ``rangeID`` string - that was added in later
-    versions). All identity fields are therefore optional and ``extra="allow"``
+    Ludus v2 identifies a range by its own ``rangeID`` + ``rangeNumber`` -
+    ranges are independent of users (one user may own/access several).
+    ``userID`` is kept for backward compatibility with any v1 server still
+    in the field; it will simply be absent from v2 responses. ``extra="allow"``
     keeps us forward-compatible with new fields Ludus might add.
 
     Field names match the camelCase keys returned by the Ludus API.
@@ -18,8 +21,8 @@ class LudusRange(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    userID: str | None = None  # noqa: N815 - matches Ludus JSON key (v1 range owner)
-    rangeID: str | None = None  # noqa: N815 - matches Ludus JSON key (post-v1)
+    userID: str | None = None  # noqa: N815 - matches Ludus JSON key (v1 range owner only)
+    rangeID: str | None = None  # noqa: N815 - matches Ludus JSON key
     rangeNumber: int | None = None  # noqa: N815 - matches Ludus JSON key
     name: str | None = None
     numberOfVMs: int | None = None  # noqa: N815 - matches Ludus JSON key
@@ -36,9 +39,9 @@ class LudusRangeListResponse(BaseModel):
 
 
 class LudusRangeConfigResponse(BaseModel):
-    """Wrapper returned by ``GET /api/ludus/ranges/{range_number}/config``."""
+    """Wrapper returned by ``GET /api/ludus/ranges/{range_id}/config``."""
 
-    range_number: int
+    range_id: str
     config_yaml: str
 
 
@@ -99,15 +102,16 @@ class LudusActionResponse(BaseModel):
 class PowerActionRequest(BaseModel):
     """Request body for power-on / power-off actions."""
 
-    user_id: str
     range_id: str | None = None
+    user_id: str | None = None
     machines: list[str] = ["all"]
 
 
 class DeployRequest(BaseModel):
     """Request body for range deploy action."""
 
-    user_id: str
+    range_id: str | None = None
+    user_id: str | None = None
 
 
 # -- Snapshot management -----------------------------------------------------
@@ -135,27 +139,28 @@ class LudusSnapshotListResponse(BaseModel):
 class SnapshotCreateRequest(BaseModel):
     """Request body for creating a snapshot."""
 
-    user_id: str
+    range_id: str | None = None
+    user_id: str | None = None
     name: str
     description: str = ""
     include_ram: bool = False
     vmids: list[int] | None = None
-    range_id: str | None = None
 
 
 class SnapshotRevertRequest(BaseModel):
     """Request body for reverting to a snapshot."""
 
-    user_id: str
+    range_id: str | None = None
+    user_id: str | None = None
     name: str
     vmids: list[int] | None = None
-    range_id: str | None = None
 
 
 class SnapshotDeleteRequest(BaseModel):
     """Request body for deleting a snapshot."""
 
-    user_id: str
+    range_id: str | None = None
+    user_id: str | None = None
     name: str
     vmids: list[int] | None = None
 
@@ -245,14 +250,14 @@ class VMDestroyRequest(BaseModel):
 class RangeAbortRequest(BaseModel):
     """Request body for range abort."""
 
-    range_id: int | None = None
+    range_id: str | None = None
     user_id: str | None = None
 
 
 class RangeDeleteVMsRequest(BaseModel):
-    """Request body for deleting all VMs in a range."""
+    """Request body for deleting all VMs in a range (keeps the range object)."""
 
-    range_id: int
+    range_id: str
     user_id: str | None = None
 
 
@@ -260,7 +265,11 @@ class RangeCreateRequest(BaseModel):
     """Request body for creating a new range."""
 
     name: str
-    range_id: int
+    range_id: str
+    description: str = ""
+    purpose: str = ""
+    user_ids: list[str] | None = None
+    range_number: int | None = None
 
 
 class RangeAssignRequest(BaseModel):
@@ -274,7 +283,7 @@ class RangeRevokeRequest(BaseModel):
     """Request body for revoking range access."""
 
     user_id: str
-    range_id: int
+    range_id: str
     force: bool = False
 
 
@@ -298,10 +307,12 @@ class LudusLogHistoryEntry(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    logID: int | None = None  # noqa: N815
-    timestamp: str | None = None
-    action: str | None = None
+    id: str | None = None
     status: str | None = None
+    start: str | None = None
+    end: str | None = None
+    created: str | None = None
+    template: str | None = None
 
 
 class LudusLogHistoryResponse(BaseModel):
@@ -315,11 +326,12 @@ class LudusLogEntryDetailResponse(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    logID: int | None = None  # noqa: N815
-    output: str | None = None
-    timestamp: str | None = None
-    action: str | None = None
+    id: str | None = None
     status: str | None = None
+    start: str | None = None
+    end: str | None = None
+    created: str | None = None
+    result: str | None = None
 
 
 class LudusTextResponse(BaseModel):
@@ -365,14 +377,14 @@ class LudusAccessibleRangesResponse(BaseModel):
 class TestingStartRequest(BaseModel):
     """Request body for starting testing mode."""
 
-    range_id: int | None = None
+    range_id: str | None = None
     user_id: str | None = None
 
 
 class TestingStopRequest(BaseModel):
     """Request body for stopping testing mode."""
 
-    range_id: int | None = None
+    range_id: str | None = None
     user_id: str | None = None
     force: bool = False
 
@@ -380,7 +392,7 @@ class TestingStopRequest(BaseModel):
 class TestingAllowDenyRequest(BaseModel):
     """Request body for allowing/denying domains/IPs during testing."""
 
-    range_id: int | None = None
+    range_id: str | None = None
     user_id: str | None = None
     domains: list[str] | None = None
     ips: list[str] | None = None
@@ -400,7 +412,7 @@ class TestingUpdateRequest(BaseModel):
     """Request body for updating testing config."""
 
     name: str
-    range_id: int | None = None
+    range_id: str | None = None
     user_id: str | None = None
 
 
@@ -436,7 +448,7 @@ class LudusGroupUser(BaseModel):
 
     userID: str  # noqa: N815
     name: str | None = None
-    manager: bool | None = None
+    role: str | None = None  # "member" | "manager"
 
 
 class LudusGroupUsersResponse(BaseModel):
@@ -446,10 +458,14 @@ class LudusGroupUsersResponse(BaseModel):
 
 
 class GroupModifyUsersRequest(BaseModel):
-    """Request body for adding/removing users from a group."""
+    """Request body for adding/removing users from a group.
+
+    ``managers`` is the subset of ``user_ids`` that should be group
+    managers (Ludus wants an array of userIDs here, not a bool).
+    """
 
     user_ids: list[str]
-    managers: bool = False
+    managers: list[str] | None = None
 
 
 class GroupModifyUsersResponse(BaseModel):
@@ -457,13 +473,14 @@ class GroupModifyUsersResponse(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    result: str | None = None
+    success: list[str] = []
+    errors: list[dict] = []
 
 
 class GroupModifyRangesRequest(BaseModel):
     """Request body for adding/removing ranges from a group."""
 
-    range_ids: list[int]
+    range_ids: list[str]
 
 
 class GroupModifyRangesResponse(BaseModel):
@@ -471,7 +488,8 @@ class GroupModifyRangesResponse(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    result: str | None = None
+    success: list[str] = []
+    errors: list[dict] = []
 
 
 class LudusGroupRangesResponse(BaseModel):
@@ -515,13 +533,18 @@ class AnsibleRoleVarsRequest(BaseModel):
 
 
 class LudusRoleVar(BaseModel):
-    """A variable for an ansible role."""
+    """The configurable variables for a single ansible role.
 
-    model_config = ConfigDict(extra="allow")
+    Matches ``POST /ansible/role/vars``'s response shape: one entry per
+    requested role, with its ``defaults/main.yml`` variables nested under
+    ``vars``.
+    """
 
-    name: str | None = None
-    default: str | None = None
-    description: str | None = None
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    name: str
+    global_: bool = Field(False, alias="global")
+    vars: dict[str, Any] = {}
 
 
 class LudusRoleVarsResponse(BaseModel):

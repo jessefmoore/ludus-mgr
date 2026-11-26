@@ -465,7 +465,7 @@ function DiscoverRangesModal({
   const handleImportRange = async (range: LudusRange) => {
     setImporting(range.rangeNumber);
     try {
-      const res = await ludus.rangeConfig(range.rangeNumber, selectedServer);
+      const res = await ludus.rangeConfig(range.rangeID, selectedServer);
       const label = range.name || range.userID || range.rangeID || `range-${range.rangeNumber}`;
       onImport({ name: label, yaml: res.config_yaml });
     } catch (err) {

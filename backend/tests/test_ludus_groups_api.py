@@ -283,13 +283,13 @@ def test_add_group_users_success(client: TestClient, mock_ludus: MagicMock) -> N
 
     resp = client.post(
         "/api/ludus/groups/test-group/users",
-        json={"user_ids": ["alice"], "managers": False},
+        json={"user_ids": ["alice"]},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["result"] == "ok"
     mock_ludus.group_add_users.assert_called_once_with(
-        "test-group", ["alice"], managers=False
+        "test-group", ["alice"], managers=None
     )
 
 
@@ -300,7 +300,7 @@ def test_add_group_users_not_found_returns_404(
 
     resp = client.post(
         "/api/ludus/groups/nonexistent/users",
-        json={"user_ids": ["alice"], "managers": False},
+        json={"user_ids": ["alice"]},
     )
     assert resp.status_code == 404
 
@@ -312,7 +312,7 @@ def test_add_group_users_ludus_error_returns_502(
 
     resp = client.post(
         "/api/ludus/groups/test-group/users",
-        json={"user_ids": ["alice"], "managers": False},
+        json={"user_ids": ["alice"]},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -321,7 +321,7 @@ def test_add_group_users_ludus_error_returns_502(
 def test_add_group_users_without_auth_returns_401(anon_client: TestClient) -> None:
     resp = anon_client.post(
         "/api/ludus/groups/test-group/users",
-        json={"user_ids": ["alice"], "managers": False},
+        json={"user_ids": ["alice"]},
     )
     assert resp.status_code == 401
 
@@ -444,12 +444,12 @@ def test_add_group_ranges_success(client: TestClient, mock_ludus: MagicMock) -> 
 
     resp = client.post(
         "/api/ludus/groups/test-group/ranges",
-        json={"range_ids": [1]},
+        json={"range_ids": ["r1"]},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["result"] == "ok"
-    mock_ludus.group_add_ranges.assert_called_once_with("test-group", [1])
+    mock_ludus.group_add_ranges.assert_called_once_with("test-group", ["r1"])
 
 
 def test_add_group_ranges_not_found_returns_404(
@@ -461,7 +461,7 @@ def test_add_group_ranges_not_found_returns_404(
 
     resp = client.post(
         "/api/ludus/groups/nonexistent/ranges",
-        json={"range_ids": [1]},
+        json={"range_ids": ["r1"]},
     )
     assert resp.status_code == 404
 
@@ -473,7 +473,7 @@ def test_add_group_ranges_ludus_error_returns_502(
 
     resp = client.post(
         "/api/ludus/groups/test-group/ranges",
-        json={"range_ids": [1]},
+        json={"range_ids": ["r1"]},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -482,7 +482,7 @@ def test_add_group_ranges_ludus_error_returns_502(
 def test_add_group_ranges_without_auth_returns_401(anon_client: TestClient) -> None:
     resp = anon_client.post(
         "/api/ludus/groups/test-group/ranges",
-        json={"range_ids": [1]},
+        json={"range_ids": ["r1"]},
     )
     assert resp.status_code == 401
 
@@ -498,12 +498,12 @@ def test_remove_group_ranges_success(client: TestClient, mock_ludus: MagicMock) 
     resp = client.request(
         "DELETE",
         "/api/ludus/groups/test-group/ranges",
-        json={"range_ids": [1]},
+        json={"range_ids": ["r1"]},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["result"] == "ok"
-    mock_ludus.group_remove_ranges.assert_called_once_with("test-group", [1])
+    mock_ludus.group_remove_ranges.assert_called_once_with("test-group", ["r1"])
 
 
 def test_remove_group_ranges_not_found_returns_404(
@@ -516,7 +516,7 @@ def test_remove_group_ranges_not_found_returns_404(
     resp = client.request(
         "DELETE",
         "/api/ludus/groups/nonexistent/ranges",
-        json={"range_ids": [1]},
+        json={"range_ids": ["r1"]},
     )
     assert resp.status_code == 404
 
@@ -529,7 +529,7 @@ def test_remove_group_ranges_ludus_error_returns_502(
     resp = client.request(
         "DELETE",
         "/api/ludus/groups/test-group/ranges",
-        json={"range_ids": [1]},
+        json={"range_ids": ["r1"]},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -539,6 +539,6 @@ def test_remove_group_ranges_without_auth_returns_401(anon_client: TestClient) -
     resp = anon_client.request(
         "DELETE",
         "/api/ludus/groups/test-group/ranges",
-        json={"range_ids": [1]},
+        json={"range_ids": ["r1"]},
     )
     assert resp.status_code == 401

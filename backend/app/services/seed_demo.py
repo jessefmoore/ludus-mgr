@@ -59,35 +59,15 @@ DEMO_STUDENTS: list[tuple[str, str]] = [
 
 
 def _find_range(client: LudusClient, range_id: str) -> dict | None:
-    # Ludus v1 keys ranges by the owning user's ID (there is no rangeID
-    # string); ``range_id`` here is treated as that owner userID.
     for row in client.range_list():
-        if row.get("userID") == range_id:
+        if row.get("rangeID") == range_id:
             return row
     return None
 
 
-def _fetch_range_yaml(client: LudusClient, *, range_id: str, range_number: int | None) -> str:
-    # On Ludus v1, a range's config is fetched by the owning user's ID.
-    # ``range_id`` is the owner userID; ``range_number`` (if any) is only
-    # used to locate that owner in the user/range list.
-    candidate_user_ids: list[str] = [range_id]
-
-    if range_number is not None:
-        for row in client.range_list():
-            if row.get("rangeNumber") == range_number:
-                owner = row.get("userID")
-                if owner and owner not in candidate_user_ids:
-                    candidate_user_ids.append(owner)
-
-    for user_id in candidate_user_ids:
-        try:
-            return client.range_get_config(user_id=user_id)
-        except LudusError:
-            continue
-
+def _fetch_range_yaml(client: LudusClient, *, range_id: str) -> str:
     try:
-        return client.range_config_example()
+        return client.range_get_config(range_id=range_id)
     except LudusError as exc:
         raise RuntimeError(f"Could not fetch range config for {range_id}") from exc
 
@@ -140,12 +120,7 @@ def seed_demo_data(settings: Settings | None = None) -> dict[str, object]:
                 if match is None:
                     logger.warning("Range %s not found on %s", target["range_id"], server_name)
                     continue
-                range_number = match.get("rangeNumber")
-                yaml_text = _fetch_range_yaml(
-                    client,
-                    range_id=target["range_id"],
-                    range_number=range_number if isinstance(range_number, int) else None,
-                )
+                yaml_text = _fetch_range_yaml(client, range_id=target["range_id"])
                 lab = _get_or_create_lab(db, settings, target=target, config_yaml=yaml_text)
                 lab_by_name[lab.name] = lab
                 created["labs"].append(lab.name)

@@ -228,11 +228,11 @@ def delete_session(
             ludus = None
         if ludus is not None:
             for s in to_clean:
-                # Destroy the range VMs (range rm --user); KEEP the Ludus user.
-                # user_rm would delete the Proxmox pool and race the async VM
-                # destroy, orphaning VMs - so we never call it here.
+                # Delete the range; KEEP the Ludus user. user_rm would delete
+                # the Proxmox pool and race the async range delete, orphaning
+                # VMs - so we never call it here.
                 try:
-                    ludus.range_destroy(user_id=s.ludus_userid, force=True)
+                    ludus.range_destroy(range_id=s.ludus_userid, force=True)
                 except LudusNotFound:
                     pass
                 except LudusError as exc:

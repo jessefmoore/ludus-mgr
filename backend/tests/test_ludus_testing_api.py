@@ -117,13 +117,13 @@ def test_testing_start_success(client: TestClient, mock_ludus: MagicMock) -> Non
 
     resp = client.put(
         "/api/ludus/testing/start",
-        json={"range_id": 1},
+        json={"range_id": "RZ"},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert body["detail"] == "Testing mode started"
-    mock_ludus.testing_start.assert_called_once_with(user_id=None)
+    mock_ludus.testing_start.assert_called_once_with(range_id="RZ", user_id=None)
 
 
 def test_testing_start_not_found_returns_404(
@@ -133,7 +133,7 @@ def test_testing_start_not_found_returns_404(
 
     resp = client.put(
         "/api/ludus/testing/start",
-        json={"range_id": 999},
+        json={"range_id": "ghost"},
     )
     assert resp.status_code == 404
 
@@ -145,7 +145,7 @@ def test_testing_start_ludus_error_returns_502(
 
     resp = client.put(
         "/api/ludus/testing/start",
-        json={"range_id": 1},
+        json={"range_id": "RZ"},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -154,7 +154,7 @@ def test_testing_start_ludus_error_returns_502(
 def test_testing_start_without_auth_returns_401(anon_client: TestClient) -> None:
     resp = anon_client.put(
         "/api/ludus/testing/start",
-        json={"range_id": 1},
+        json={"range_id": "RZ"},
     )
     assert resp.status_code == 401
 
@@ -169,13 +169,13 @@ def test_testing_stop_success(client: TestClient, mock_ludus: MagicMock) -> None
 
     resp = client.put(
         "/api/ludus/testing/stop",
-        json={"range_id": 1, "force": True},
+        json={"range_id": "RZ", "force": True},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert body["detail"] == "Testing mode stopped"
-    mock_ludus.testing_stop.assert_called_once_with(user_id=None, force=True)
+    mock_ludus.testing_stop.assert_called_once_with(range_id="RZ", user_id=None, force=True)
 
 
 def test_testing_stop_not_found_returns_404(
@@ -185,7 +185,7 @@ def test_testing_stop_not_found_returns_404(
 
     resp = client.put(
         "/api/ludus/testing/stop",
-        json={"range_id": 999},
+        json={"range_id": "ghost"},
     )
     assert resp.status_code == 404
 
@@ -197,7 +197,7 @@ def test_testing_stop_ludus_error_returns_502(
 
     resp = client.put(
         "/api/ludus/testing/stop",
-        json={"range_id": 1},
+        json={"range_id": "RZ"},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -206,7 +206,7 @@ def test_testing_stop_ludus_error_returns_502(
 def test_testing_stop_without_auth_returns_401(anon_client: TestClient) -> None:
     resp = anon_client.put(
         "/api/ludus/testing/stop",
-        json={"range_id": 1},
+        json={"range_id": "RZ"},
     )
     assert resp.status_code == 401
 
@@ -224,14 +224,14 @@ def test_testing_allow_success(client: TestClient, mock_ludus: MagicMock) -> Non
 
     resp = client.post(
         "/api/ludus/testing/allow",
-        json={"range_id": 1, "domains": ["example.com"]},
+        json={"range_id": "RZ", "domains": ["example.com"]},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["result"] == "ok"
     assert body["domains"] == ["example.com"]
     mock_ludus.testing_allow.assert_called_once_with(
-        user_id=None, domains=["example.com"], ips=None
+        range_id="RZ", user_id=None, domains=["example.com"], ips=None
     )
 
 
@@ -242,7 +242,7 @@ def test_testing_allow_not_found_returns_404(
 
     resp = client.post(
         "/api/ludus/testing/allow",
-        json={"range_id": 999, "domains": ["example.com"]},
+        json={"range_id": "ghost", "domains": ["example.com"]},
     )
     assert resp.status_code == 404
 
@@ -254,7 +254,7 @@ def test_testing_allow_ludus_error_returns_502(
 
     resp = client.post(
         "/api/ludus/testing/allow",
-        json={"range_id": 1, "domains": ["example.com"]},
+        json={"range_id": "RZ", "domains": ["example.com"]},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -263,7 +263,7 @@ def test_testing_allow_ludus_error_returns_502(
 def test_testing_allow_without_auth_returns_401(anon_client: TestClient) -> None:
     resp = anon_client.post(
         "/api/ludus/testing/allow",
-        json={"range_id": 1, "domains": ["example.com"]},
+        json={"range_id": "RZ", "domains": ["example.com"]},
     )
     assert resp.status_code == 401
 
@@ -281,13 +281,13 @@ def test_testing_deny_success(client: TestClient, mock_ludus: MagicMock) -> None
 
     resp = client.post(
         "/api/ludus/testing/deny",
-        json={"range_id": 1, "ips": ["1.2.3.4"]},
+        json={"range_id": "RZ", "ips": ["1.2.3.4"]},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["result"] == "ok"
     mock_ludus.testing_deny.assert_called_once_with(
-        user_id=None, domains=None, ips=["1.2.3.4"]
+        range_id="RZ", user_id=None, domains=None, ips=["1.2.3.4"]
     )
 
 
@@ -298,7 +298,7 @@ def test_testing_deny_not_found_returns_404(
 
     resp = client.post(
         "/api/ludus/testing/deny",
-        json={"range_id": 999, "ips": ["1.2.3.4"]},
+        json={"range_id": "ghost", "ips": ["1.2.3.4"]},
     )
     assert resp.status_code == 404
 
@@ -310,7 +310,7 @@ def test_testing_deny_ludus_error_returns_502(
 
     resp = client.post(
         "/api/ludus/testing/deny",
-        json={"range_id": 1, "ips": ["1.2.3.4"]},
+        json={"range_id": "RZ", "ips": ["1.2.3.4"]},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -319,7 +319,7 @@ def test_testing_deny_ludus_error_returns_502(
 def test_testing_deny_without_auth_returns_401(anon_client: TestClient) -> None:
     resp = anon_client.post(
         "/api/ludus/testing/deny",
-        json={"range_id": 1, "ips": ["1.2.3.4"]},
+        json={"range_id": "RZ", "ips": ["1.2.3.4"]},
     )
     assert resp.status_code == 401
 
@@ -334,13 +334,13 @@ def test_testing_update_success(client: TestClient, mock_ludus: MagicMock) -> No
 
     resp = client.post(
         "/api/ludus/testing/update",
-        json={"name": "test-config", "range_id": 1},
+        json={"name": "test-config", "range_id": "RZ"},
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert body["detail"] == "Testing config updated"
-    mock_ludus.testing_update.assert_called_once_with("test-config", user_id=None)
+    mock_ludus.testing_update.assert_called_once_with("test-config", range_id="RZ", user_id=None)
 
 
 def test_testing_update_not_found_returns_404(
@@ -350,7 +350,7 @@ def test_testing_update_not_found_returns_404(
 
     resp = client.post(
         "/api/ludus/testing/update",
-        json={"name": "test-config", "range_id": 999},
+        json={"name": "test-config", "range_id": "ghost"},
     )
     assert resp.status_code == 404
 
@@ -362,7 +362,7 @@ def test_testing_update_ludus_error_returns_502(
 
     resp = client.post(
         "/api/ludus/testing/update",
-        json={"name": "test-config", "range_id": 1},
+        json={"name": "test-config", "range_id": "RZ"},
     )
     assert resp.status_code == 502
     assert "Ludus error" in resp.json()["detail"]
@@ -371,6 +371,6 @@ def test_testing_update_ludus_error_returns_502(
 def test_testing_update_without_auth_returns_401(anon_client: TestClient) -> None:
     resp = anon_client.post(
         "/api/ludus/testing/update",
-        json={"name": "test-config", "range_id": 1},
+        json={"name": "test-config", "range_id": "RZ"},
     )
     assert resp.status_code == 401

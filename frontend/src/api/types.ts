@@ -172,9 +172,9 @@ export interface CSVImportResponse {
 
 // Ludus Discovery
 export interface LudusRange {
-  // Ludus v1 identifies a range by its owning user (userID); rangeID is null
-  // there (typed string for newer-Ludus compatibility) and callers fall back
-  // to userID.
+  // rangeID is the stable identifier to use when addressing a range (path/
+  // query params); rangeNumber is a read-only display counter. userID is
+  // only present on legacy v1 servers.
   userID?: string;
   rangeID: string;
   rangeNumber: number;
@@ -205,7 +205,7 @@ export interface LudusCapacity {
 }
 
 export interface LudusRangeConfigResponse {
-  range_number: number;
+  range_id: string;
   config_yaml: string;
 }
 
@@ -222,19 +222,19 @@ export interface LudusSnapshotListResponse {
 }
 
 export interface SnapshotCreateRequest {
-  user_id: string;
+  range_id?: string;
+  user_id?: string;
   name: string;
   description?: string;
   include_ram?: boolean;
   vmids?: number[];
-  range_id?: string;
 }
 
 export interface SnapshotRevertRequest {
-  user_id: string;
+  range_id?: string;
+  user_id?: string;
   name: string;
   vmids?: number[];
-  range_id?: string;
 }
 
 // Ludus Templates
@@ -267,8 +267,8 @@ export interface LudusTemplateBuildStatusResponse {
 
 // Ludus Management Actions
 export interface PowerActionRequest {
-  user_id: string;
   range_id?: string;
+  user_id?: string;
   machines?: string[];
 }
 
@@ -350,10 +350,12 @@ export interface LudusRangeLogsResponse {
 }
 
 export interface LudusLogHistoryEntry {
-  logID?: number;
-  timestamp?: string;
-  action?: string;
-  status?: string;
+  id?: string;
+  status?: "success" | "failure" | "running" | "aborted" | string;
+  start?: string;
+  end?: string;
+  created?: string;
+  template?: string;
   [key: string]: unknown;
 }
 
@@ -362,11 +364,12 @@ export interface LudusLogHistoryResponse {
 }
 
 export interface LudusLogEntryDetailResponse {
-  logID?: number;
-  output?: string;
-  timestamp?: string;
-  action?: string;
+  id?: string;
   status?: string;
+  start?: string;
+  end?: string;
+  created?: string;
+  result?: string;
   [key: string]: unknown;
 }
 
@@ -397,18 +400,18 @@ export interface LudusAccessibleRangesResponse {
 
 // Ludus Testing
 export interface TestingStartRequest {
-  range_id?: number;
+  range_id?: string;
   user_id?: string;
 }
 
 export interface TestingStopRequest {
-  range_id?: number;
+  range_id?: string;
   user_id?: string;
   force?: boolean;
 }
 
 export interface TestingAllowDenyRequest {
-  range_id?: number;
+  range_id?: string;
   user_id?: string;
   domains?: string[];
   ips?: string[];
@@ -423,7 +426,7 @@ export interface TestingAllowDenyResponse {
 
 export interface TestingUpdateRequest {
   name: string;
-  range_id?: number;
+  range_id?: string;
   user_id?: string;
 }
 
@@ -441,7 +444,7 @@ export interface LudusGroupListResponse {
 export interface LudusGroupUser {
   userID: string;
   name?: string;
-  manager?: boolean;
+  role?: "member" | "manager" | string;
   [key: string]: unknown;
 }
 
@@ -465,9 +468,9 @@ export interface LudusSubscriptionRolesResponse {
 }
 
 export interface LudusRoleVar {
-  name?: string;
-  default?: string;
-  description?: string;
+  name: string;
+  global?: boolean;
+  vars?: Record<string, unknown>;
   [key: string]: unknown;
 }
 

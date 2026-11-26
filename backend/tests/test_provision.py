@@ -43,7 +43,7 @@ from app.models import (
 from app.models import (
     Session as SessionRow,
 )
-from app.services.exceptions import LudusError, LudusTimeout, LudusUserExists
+from app.services.exceptions import LudusError, LudusRangeExists, LudusTimeout, LudusUserExists
 from app.services.provision import extract_role_names
 
 ADMIN_EMAIL = "instructor@example.com"
@@ -70,9 +70,13 @@ class FakeLudus:
     def __init__(self) -> None:
         self._ranges: list[dict] = []
         self._users: list[dict] = []
+        self._created_ranges: set[str] = set()
 
         self.user_add_calls: list[dict[str, str]] = []
         self.user_add_overrides: dict[str, Exception] = {}
+
+        self.range_create_calls: list[dict[str, Any]] = []
+        self.range_create_overrides: dict[str, Exception] = {}
 
         self.range_assign_calls: list[dict[str, str]] = []
         self.range_assign_overrides: dict[str, Exception] = {}
@@ -106,42 +110,54 @@ class FakeLudus:
     def user_list(self) -> list[dict]:
         return self._users
 
-    def range_access_grant(
+    def range_create(
         self,
-        source_user_id: str,
-        target_user_id: str,
+        name: str,
+        range_id: str,
         *,
-        force: bool = False,
+        user_ids: list[str] | None = None,
+        description: str = "",
+        purpose: str = "",
+        range_number: int | None = None,
     ) -> dict:
-        # v1 range sharing: source_user_id gains access to target_user_id's
-        # range. Recorded in range_assign_calls for continuity with existing
-        # assertions (userid = student, range_id = shared range owner).
-        self.range_assign_calls.append(
-            {"userid": source_user_id, "range_id": target_user_id}
+        self.range_create_calls.append(
+            {"name": name, "range_id": range_id, "user_ids": user_ids}
         )
-        exc = self.range_assign_overrides.get(source_user_id)
+        exc = self.range_create_overrides.get(range_id)
+        if exc is not None:
+            raise exc
+        if range_id in self._created_ranges:
+            raise LudusRangeExists("range already exists", status_code=400)
+        self._created_ranges.add(range_id)
+        return {"rangeID": range_id}
+
+    def range_assign(self, user_id: str, range_id: str) -> dict:
+        # v2 range sharing: user_id gains access to range_id. Recorded in
+        # range_assign_calls (userid = student, range_id = shared range owner).
+        self.range_assign_calls.append({"userid": user_id, "range_id": range_id})
+        exc = self.range_assign_overrides.get(user_id)
         if exc is not None:
             raise exc
         return {"result": "ok"}
 
     def ansible_scope_roles_global(self, roles: list[str], *, force: bool = False) -> None:
-        # v1 global role scoping (replaces ansible_role_scope). Recorded in
+        # Global role scoping via role/scope. Recorded in
         # ansible_role_scope_calls for continuity with existing assertions.
         self.ansible_role_scope_calls.append(
-            {"roles": roles, "global_": True, "copy": False}
+            {"roles": roles, "global_": True, "copy": True}
         )
         if self.ansible_role_scope_error is not None:
             raise self.ansible_role_scope_error
 
-    def range_deploy(self, userid: str, config_yaml: str) -> None:
-        self.range_deploy_calls.append({"userid": userid, "config_yaml": config_yaml})
-        exc = self.range_deploy_overrides.get(userid)
+    def range_deploy(self, range_id: str, config_yaml: str) -> None:
+        self.range_deploy_calls.append({"userid": range_id, "config_yaml": config_yaml})
+        exc = self.range_deploy_overrides.get(range_id)
         if exc is not None:
             raise exc
 
-    def range_get_vms(self, *, user_id: str) -> dict:
-        self.range_get_vms_calls.append(user_id)
-        override = self.range_get_vms_overrides.get(user_id)
+    def range_get_vms(self, *, range_id: str) -> dict:
+        self.range_get_vms_calls.append(range_id)
+        override = self.range_get_vms_overrides.get(range_id)
         if isinstance(override, Exception):
             raise override
         if isinstance(override, dict):
@@ -149,7 +165,7 @@ class FakeLudus:
         # Default: a live, deployed range with one powered-on VM, so the
         # "confirmed up" gate passes and students land in ``ready``.
         return {
-            "userID": user_id,
+            "rangeID": range_id,
             "rangeState": "SUCCESS",
             "VMs": [{"name": "KALI", "poweredOn": True}],
         }

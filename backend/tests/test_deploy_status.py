@@ -26,13 +26,13 @@ class FakeLudus:
         self.states = states
         self.calls: list[str] = []
 
-    def range_get_vms(self, *, user_id: str) -> dict:
-        self.calls.append(user_id)
-        val = self.states.get(user_id)
+    def range_get_vms(self, *, range_id: str) -> dict:
+        self.calls.append(range_id)
+        val = self.states.get(range_id)
         if isinstance(val, Exception):
             raise val
         if val is None:
-            raise LudusError(f"User {user_id} not found", status_code=400)
+            raise LudusError(f"Range {range_id} not found", status_code=400)
         return val
 
 

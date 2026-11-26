@@ -1,7 +1,7 @@
 [project]
-name = "ludus-v1-mgr-backend"
+name = "ludus-mgr-backend"
 version = "1.0.0"
-description = "ludus-v1 Manager - Ludus training lab deployment manager"
+description = "Ludus Manager - Ludus training lab deployment manager"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

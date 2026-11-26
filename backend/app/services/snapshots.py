@@ -96,9 +96,9 @@ def ensure_baseline_snapshots(
         raise
 
     state_by_uid = {
-        r["userID"]: r.get("rangeState")
+        r["rangeID"]: r.get("rangeState")
         for r in ranges
-        if isinstance(r, dict) and r.get("userID")
+        if isinstance(r, dict) and r.get("rangeID")
     }
 
     result = BaselineResult()
@@ -128,7 +128,7 @@ def ensure_baseline_snapshots(
         try:
             ludus.snapshot_create(
                 snapshot_name,
-                user_id=uid,
+                range_id=uid,
                 description="Baseline snapshot (auto) for Reset Environment",
                 include_ram=include_ram,
             )

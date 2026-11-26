@@ -277,44 +277,42 @@ export const ludus = {
   capacity: (server?: string) =>
     request<LudusCapacity>(`/api/ludus/capacity${serverQs(server)}`),
 
-  rangeConfig: (rangeNumber: number, server?: string) =>
-    request<LudusRangeConfigResponse>(`/api/ludus/ranges/${rangeNumber}/config${serverQs(server)}`),
+  rangeConfig: (rangeId: string, server?: string) =>
+    request<LudusRangeConfigResponse>(`/api/ludus/ranges/${encodeURIComponent(rangeId)}/config${serverQs(server)}`),
 
-  deployRange: (rangeNumber: number, data: { user_id: string }, server?: string) =>
-    request<LudusActionResponse>(`/api/ludus/ranges/${rangeNumber}/deploy${serverQs(server)}`, {
+  deployRange: (rangeId: string, data?: { user_id?: string }, server?: string) =>
+    request<LudusActionResponse>(`/api/ludus/ranges/${encodeURIComponent(rangeId)}/deploy${serverQs(server)}`, {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify(data ?? {}),
     }),
 
-  destroyRange: (rangeNumber: number, server?: string, force?: boolean, userId?: string, rangeStrId?: string) => {
+  destroyRange: (rangeId: string, server?: string, force?: boolean, userId?: string) => {
     const extra: Record<string, string> = {};
     if (force) extra.force = "true";
     if (userId) extra.user_id = userId;
-    if (rangeStrId) extra.range_str_id = rangeStrId;
     return request<LudusActionResponse>(
-      `/api/ludus/ranges/${rangeNumber}${serverQs(server, Object.keys(extra).length ? extra : undefined)}`,
+      `/api/ludus/ranges/${encodeURIComponent(rangeId)}${serverQs(server, Object.keys(extra).length ? extra : undefined)}`,
       { method: "DELETE" },
     );
   },
 
-  powerOn: (rangeNumber: number, data: PowerActionRequest, server?: string) =>
-    request<LudusActionResponse>(`/api/ludus/ranges/${rangeNumber}/power-on${serverQs(server)}`, {
+  powerOn: (rangeId: string, data: PowerActionRequest, server?: string) =>
+    request<LudusActionResponse>(`/api/ludus/ranges/${encodeURIComponent(rangeId)}/power-on${serverQs(server)}`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  powerOff: (rangeNumber: number, data: PowerActionRequest, server?: string) =>
-    request<LudusActionResponse>(`/api/ludus/ranges/${rangeNumber}/power-off${serverQs(server)}`, {
+  powerOff: (rangeId: string, data: PowerActionRequest, server?: string) =>
+    request<LudusActionResponse>(`/api/ludus/ranges/${encodeURIComponent(rangeId)}/power-off${serverQs(server)}`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  snapshots: (params?: { user_id?: string; range_number?: number; range_id?: string; server?: string }) => {
+  snapshots: (params?: { range_id?: string; user_id?: string; server?: string }) => {
     const qs = new URLSearchParams();
     if (params?.server && params.server !== "default") qs.set("server", params.server);
-    if (params?.user_id) qs.set("user_id", params.user_id);
-    if (params?.range_number != null) qs.set("range_number", String(params.range_number));
     if (params?.range_id) qs.set("range_id", params.range_id);
+    if (params?.user_id) qs.set("user_id", params.user_id);
     const q = qs.toString();
     return request<LudusSnapshotListResponse>(`/api/ludus/snapshots${q ? `?${q}` : ""}`);
   },
@@ -331,12 +329,13 @@ export const ludus = {
       body: JSON.stringify(data),
     }),
 
-  deleteSnapshot: (name: string, userId: string, rangeId?: string, server?: string) => {
-    const extra: Record<string, string> = { user_id: userId };
-    if (rangeId) extra.range_id = rangeId;
+  deleteSnapshot: (name: string, params?: { range_id?: string; user_id?: string }, server?: string) => {
+    const extra: Record<string, string> = {};
+    if (params?.range_id) extra.range_id = params.range_id;
+    if (params?.user_id) extra.user_id = params.user_id;
     if (server && server !== "default") extra.server = server;
     const qs = new URLSearchParams(extra).toString();
-    return request<LudusActionResponse>(`/api/ludus/snapshots/${encodeURIComponent(name)}?${qs}`, {
+    return request<LudusActionResponse>(`/api/ludus/snapshots/${encodeURIComponent(name)}${qs ? `?${qs}` : ""}`, {
       method: "DELETE",
     });
   },
@@ -367,10 +366,10 @@ export const ludus = {
     request<LudusTextResponse>(`/api/ludus/templates/build-logs${serverQs(server)}`),
 
   // Range detail / VM operations
-  rangeVms: (params?: { range_id?: number; user_id?: string; server?: string }) => {
+  rangeVms: (params?: { range_id?: string; user_id?: string; server?: string }) => {
     const qs = new URLSearchParams();
     if (params?.server && params.server !== "default") qs.set("server", params.server);
-    if (params?.range_id != null) qs.set("range_id", String(params.range_id));
+    if (params?.range_id) qs.set("range_id", params.range_id);
     if (params?.user_id) qs.set("user_id", params.user_id);
     const q = qs.toString();
     return request<LudusRangeDetailResponse>(`/api/ludus/range/vms${q ? `?${q}` : ""}`);
@@ -381,17 +380,17 @@ export const ludus = {
       method: "DELETE",
     }),
 
-  abortRange: (data: { range_id?: number; user_id?: string }, server?: string) =>
+  abortRange: (data: { range_id?: string; user_id?: string }, server?: string) =>
     request<LudusActionResponse>(`/api/ludus/range/abort${serverQs(server)}`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  deleteRangeVms: (rangeId: number, userId?: string, server?: string) => {
+  deleteRangeVms: (rangeId: string, userId?: string, server?: string) => {
     const extra: Record<string, string> = {};
     if (userId) extra.user_id = userId;
     return request<LudusActionResponse>(
-      `/api/ludus/range/${rangeId}/vms${serverQs(server, extra)}`,
+      `/api/ludus/range/${encodeURIComponent(rangeId)}/vms${serverQs(server, extra)}`,
       { method: "DELETE" },
     );
   },
@@ -403,36 +402,37 @@ export const ludus = {
     request<LudusTextResponse>(`/api/ludus/range/config/example${serverQs(server)}`),
 
   rangeLogs: (params?: {
-    range_id?: number; user_id?: string; range_str_id?: string;
-    tail?: number; cursor?: string; server?: string;
+    range_id?: string; user_id?: string;
+    tail?: number; cursor?: number; server?: string;
   }) => {
     const qs = new URLSearchParams();
     if (params?.server && params.server !== "default") qs.set("server", params.server);
-    if (params?.range_id != null) qs.set("range_id", String(params.range_id));
+    if (params?.range_id) qs.set("range_id", params.range_id);
     if (params?.user_id) qs.set("user_id", params.user_id);
-    if (params?.range_str_id) qs.set("range_str_id", params.range_str_id);
     if (params?.tail != null) qs.set("tail", String(params.tail));
-    if (params?.cursor) qs.set("cursor", params.cursor);
+    if (params?.cursor != null) qs.set("cursor", String(params.cursor));
     const q = qs.toString();
     return request<LudusRangeLogsResponse>(`/api/ludus/range/logs${q ? `?${q}` : ""}`);
   },
 
-  rangeLogsHistory: (params?: { range_id?: number; user_id?: string; server?: string }) => {
+  rangeLogsHistory: (params?: { range_id?: string; user_id?: string; server?: string }) => {
     const qs = new URLSearchParams();
     if (params?.server && params.server !== "default") qs.set("server", params.server);
-    if (params?.range_id != null) qs.set("range_id", String(params.range_id));
+    if (params?.range_id) qs.set("range_id", params.range_id);
     if (params?.user_id) qs.set("user_id", params.user_id);
     const q = qs.toString();
     return request<LudusLogHistoryResponse>(`/api/ludus/range/logs/history${q ? `?${q}` : ""}`);
   },
 
-  rangeLogEntry: (logId: number, server?: string) =>
-    request<LudusLogEntryDetailResponse>(`/api/ludus/range/logs/history/${logId}${serverQs(server)}`),
+  rangeLogEntry: (logId: string, rangeId?: string, server?: string) =>
+    request<LudusLogEntryDetailResponse>(
+      `/api/ludus/range/logs/history/${encodeURIComponent(logId)}${serverQs(server, rangeId ? { range_id: rangeId } : undefined)}`,
+    ),
 
-  rangeEtcHosts: (params?: { range_id?: number; user_id?: string; server?: string }) => {
+  rangeEtcHosts: (params?: { range_id?: string; user_id?: string; server?: string }) => {
     const qs = new URLSearchParams();
     if (params?.server && params.server !== "default") qs.set("server", params.server);
-    if (params?.range_id != null) qs.set("range_id", String(params.range_id));
+    if (params?.range_id) qs.set("range_id", params.range_id);
     if (params?.user_id) qs.set("user_id", params.user_id);
     const q = qs.toString();
     return request<LudusTextResponse>(`/api/ludus/range/etchosts${q ? `?${q}` : ""}`);
@@ -441,10 +441,10 @@ export const ludus = {
   rangeSshConfig: (server?: string) =>
     request<LudusTextResponse>(`/api/ludus/range/sshconfig${serverQs(server)}`),
 
-  rangeRdpConfigs: async (params?: { range_id?: number; user_id?: string; server?: string }) => {
+  rangeRdpConfigs: async (params?: { range_id?: string; user_id?: string; server?: string }) => {
     const qs = new URLSearchParams();
     if (params?.server && params.server !== "default") qs.set("server", params.server);
-    if (params?.range_id != null) qs.set("range_id", String(params.range_id));
+    if (params?.range_id) qs.set("range_id", params.range_id);
     if (params?.user_id) qs.set("user_id", params.user_id);
     const q = qs.toString();
     const res = await fetch(`/api/ludus/range/rdpconfigs${q ? `?${q}` : ""}`, {
@@ -454,16 +454,22 @@ export const ludus = {
     return res.blob();
   },
 
-  rangeAnsibleInventory: (params?: { range_id?: number; user_id?: string; server?: string }) => {
+  rangeAnsibleInventory: (params?: { range_id?: string; user_id?: string; server?: string }) => {
     const qs = new URLSearchParams();
     if (params?.server && params.server !== "default") qs.set("server", params.server);
-    if (params?.range_id != null) qs.set("range_id", String(params.range_id));
+    if (params?.range_id) qs.set("range_id", params.range_id);
     if (params?.user_id) qs.set("user_id", params.user_id);
     const q = qs.toString();
     return request<LudusTextResponse>(`/api/ludus/range/ansibleinventory${q ? `?${q}` : ""}`);
   },
 
-  createRange: (data: { name: string; range_id: number }, server?: string) =>
+  createRange: (
+    data: {
+      name: string; range_id: string; description?: string; purpose?: string;
+      user_ids?: string[]; range_number?: number;
+    },
+    server?: string,
+  ) =>
     request<LudusActionResponse>(`/api/ludus/ranges/create${serverQs(server)}`, {
       method: "POST",
       body: JSON.stringify(data),
@@ -475,7 +481,7 @@ export const ludus = {
       body: JSON.stringify(data),
     }),
 
-  revokeRange: (data: { user_id: string; range_id: number; force?: boolean }, server?: string) =>
+  revokeRange: (data: { user_id: string; range_id: string; force?: boolean }, server?: string) =>
     request<LudusActionResponse>(`/api/ludus/ranges/revoke${serverQs(server)}`, {
       method: "DELETE",
       body: JSON.stringify(data),
@@ -563,7 +569,7 @@ export const ludusGroups = {
   users: (groupName: string, server?: string) =>
     request<LudusGroupUsersResponse>(`/api/ludus/groups/${encodeURIComponent(groupName)}/users${serverQs(server)}`),
 
-  addUsers: (groupName: string, data: { user_ids: string[]; managers?: boolean }, server?: string) =>
+  addUsers: (groupName: string, data: { user_ids: string[]; managers?: string[] }, server?: string) =>
     request<LudusActionResponse>(`/api/ludus/groups/${encodeURIComponent(groupName)}/users${serverQs(server)}`, {
       method: "POST",
       body: JSON.stringify(data),
@@ -578,13 +584,13 @@ export const ludusGroups = {
   ranges: (groupName: string, server?: string) =>
     request<LudusGroupRangesResponse>(`/api/ludus/groups/${encodeURIComponent(groupName)}/ranges${serverQs(server)}`),
 
-  addRanges: (groupName: string, data: { range_ids: number[] }, server?: string) =>
+  addRanges: (groupName: string, data: { range_ids: string[] }, server?: string) =>
     request<LudusActionResponse>(`/api/ludus/groups/${encodeURIComponent(groupName)}/ranges${serverQs(server)}`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  removeRanges: (groupName: string, data: { range_ids: number[] }, server?: string) =>
+  removeRanges: (groupName: string, data: { range_ids: string[] }, server?: string) =>
     request<LudusActionResponse>(`/api/ludus/groups/${encodeURIComponent(groupName)}/ranges${serverQs(server)}`, {
       method: "DELETE",
       body: JSON.stringify(data),

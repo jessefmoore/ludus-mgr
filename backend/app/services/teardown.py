@@ -3,16 +3,17 @@
 Two operations, both driven per-student and best-effort so one flaky VM
 doesn't strand the rest of the batch:
 
-* :func:`rebuild_session` - destroy the range VMs but KEEP the Ludus users,
-  invites and WireGuard configs. Students flip back to ``pending`` so a
-  subsequent provision redeploys fresh VMs for the same people. For a shared
-  session the single shared range is destroyed once and ``shared_range_id`` is
-  cleared so provision auto-creates a fresh one.
+* :func:`rebuild_session` - delete each student's range (``range_destroy``,
+  which on Ludus v2 removes the range object + VMs from the DB and Proxmox)
+  but KEEP the Ludus users, invites and WireGuard configs. Students flip back
+  to ``pending`` so a subsequent provision re-creates a fresh range for the
+  same people. For a shared session the single shared range is destroyed once
+  and ``shared_range_id`` is cleared so provision auto-creates a fresh one.
 
-* :func:`teardown_session` - destroy each student's range VMs (``ludus range
-  rm --user``) but KEEP the Ludus users and their WireGuard configs, then mark
-  the session ``ended``. Users are intentionally not removed: ``user rm`` drops
-  the Proxmox pool and races the asynchronous VM destroy, orphaning VMs.
+* :func:`teardown_session` - delete each student's range the same way, KEEP
+  the Ludus users and their WireGuard configs, then mark the session
+  ``ended``. Users are intentionally not removed: ``user rm`` drops the
+  Proxmox pool and races the asynchronous range delete, orphaning VMs.
   Students flip to ``range_removed``.
 
 Both resolve the Ludus client from the lab template's ``ludus_server`` via the
@@ -124,11 +125,12 @@ def rebuild_session(
     ludus: LudusClient | None = None,
     registry: LudusClientRegistry | None = None,
 ) -> TeardownResult:
-    """Destroy range VMs but keep users/invites so a re-provision rebuilds fresh.
+    """Delete each student's range but keep users/invites so a re-provision rebuilds fresh.
 
-    Dedicated: each provisioned student's range is destroyed. Shared: the one
-    shared range is destroyed and ``shared_range_id`` cleared. Provisioned
-    students flip to ``pending`` (config kept - provision rewrites it). Session
+    Dedicated: each provisioned student's range is deleted. Shared: the one
+    shared range is deleted and ``shared_range_id`` cleared. Provisioned
+    students flip to ``pending`` (config kept - provision rewrites it); the
+    next provision pass re-creates the range via ``range_create``. Session
     status is left as-is so "Provision All" can redeploy.
     """
     session_row, _lab, client = _resolve(db, session_id, ludus, registry)
@@ -141,7 +143,7 @@ def rebuild_session(
         # One shared range to destroy (owned by the lead user).
         if session_row.shared_range_id:
             try:
-                client.range_destroy(user_id=session_row.shared_range_id, force=True)
+                client.range_destroy(range_id=session_row.shared_range_id, force=True)
             except LudusError as exc:
                 if not _is_missing(exc):
                     logger.warning("rebuild: shared range_destroy failed: %s", exc)
@@ -167,7 +169,7 @@ def rebuild_session(
                 result.skipped += 1
                 continue
             try:
-                client.range_destroy(user_id=student.ludus_userid, force=True)
+                client.range_destroy(range_id=student.ludus_userid, force=True)
             except LudusError as exc:
                 if _is_missing(exc):
                     logger.info("rebuild: range for %s already gone", student.ludus_userid)
@@ -200,12 +202,12 @@ def teardown_session(
     ludus: LudusClient | None = None,
     registry: LudusClientRegistry | None = None,
 ) -> TeardownResult:
-    """Tear down a session's ranges (``ludus range rm --user``) and end it.
+    """Tear down a session's ranges and end it.
 
-    Each provisioned student's range VMs are destroyed but the Ludus user is
-    KEPT, so the user/pool persists and can be redeployed later. We deliberately
+    Each provisioned student's range is deleted but the Ludus user is KEPT,
+    so the user/pool persists and can get a fresh range later. We deliberately
     do NOT call ``user_rm``: Ludus's user removal deletes the user's Proxmox
-    pool and races the *asynchronous* VM destroy, which fails on a non-empty
+    pool and races the *asynchronous* range delete, which fails on a non-empty
     pool and orphans VMs. Students flip to ``range_removed``; a range that is
     already gone still counts as cleaned. Per-student failures are marked
     ``error`` but the session is still marked ``ended``.
@@ -218,9 +220,9 @@ def teardown_session(
         if student.status == StudentStatus.pending:
             result.skipped += 1
             continue
-        # Destroy the range VMs only (range rm --user); keep the Ludus user.
+        # Delete the range (keeps the Ludus user).
         try:
-            client.range_destroy(user_id=student.ludus_userid, force=True)
+            client.range_destroy(range_id=student.ludus_userid, force=True)
         except LudusError as exc:
             if _is_missing(exc):
                 logger.info("teardown: range for %s already gone", student.ludus_userid)
@@ -232,7 +234,7 @@ def teardown_session(
                 result.failed += 1
                 db.commit()
                 continue
-        # Keep the user and their WireGuard config; only the VMs are gone.
+        # Keep the user and their WireGuard config; the range itself is gone.
         student.status = StudentStatus.range_removed
         student.range_id = None
         result.cleaned += 1

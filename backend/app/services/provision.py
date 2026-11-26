@@ -36,7 +36,7 @@ from app.core.config import Settings
 from app.models import LabTemplate, SessionMode, SessionStatus, Student, StudentStatus
 from app.models import Session as SessionRow
 from app.models.event import Event
-from app.services.exceptions import LudusError, LudusUserExists
+from app.services.exceptions import LudusError, LudusRangeExists, LudusUserExists
 from app.services.resources import compute_range_resources, compute_session_demand
 
 if TYPE_CHECKING:
@@ -221,8 +221,6 @@ def _ensure_roles_global_scope(
         return
 
     try:
-        # Ludus v1 has no role-scope endpoint; installing a role globally is
-        # how it is made available to all users.
         ludus.ansible_scope_roles_global(roles)
     except Exception as exc:
         logger.warning(
@@ -312,6 +310,21 @@ def _write_wg_config(
     return path
 
 
+def _ensure_range(ludus: LudusClient, userid: str, name: str) -> None:
+    """Create *userid*'s range if it doesn't already exist (idempotent).
+
+    This platform keeps a 1:1 "one range per student" convention: a
+    student's rangeID is always their Ludus userID. Ludus v2 no longer
+    auto-creates a range alongside a user, so provisioning must call
+    ``range_create`` explicitly before the first ``range_deploy``. The
+    range is pre-assigned to its owning user at creation time.
+    """
+    try:
+        ludus.range_create(name, userid, user_ids=[userid])
+    except LudusRangeExists:
+        logger.debug("ensure_range: range %s already exists", userid)
+
+
 def _auto_create_shared_range(
     db: DBSession,
     ludus: LudusClient,
@@ -319,17 +332,18 @@ def _auto_create_shared_range(
     lab_template: LabTemplate,
     lead_student: Student,
 ) -> None:
-    """Create the lead student's Ludus user and deploy the shared range.
+    """Create the lead student's Ludus user+range and deploy the shared range.
 
-    On Ludus v1 a user owns exactly one range, addressed by that user's ID.
-    The "shared range" is therefore simply the lead student's range: other
-    students are granted cross-range access to it (see
-    :func:`_provision_one`). ``session_row.shared_range_id`` stores the lead
-    student's ``userID`` (the owner of the shared range).
+    This platform keeps a 1:1 "one range per student" convention: a range is
+    always addressed by its owning student's Ludus userID. The "shared
+    range" is therefore simply the lead student's range: other students are
+    assigned cross-range access to it (see :func:`_provision_one`).
+    ``session_row.shared_range_id`` stores the lead student's ``userID``
+    (== the owning rangeID).
 
     Steps:
         1. ``user_add`` for the lead student (idempotent).
-        2. ``range_deploy`` with the lab template config.
+        2. ``range_create`` + ``range_deploy`` with the lab template config.
         3. Persist ``shared_range_id = lead userID`` and commit.
 
     Raises ``LudusError`` on any Ludus failure so the caller can decide how
@@ -347,13 +361,14 @@ def _auto_create_shared_range(
     except LudusUserExists:
         logger.debug("auto_create_range: user %s already exists", userid)
 
-    # 2. Deploy the lab template config for this user's range.
+    # 2. Create (idempotent) then deploy the lab template config.
+    _ensure_range(ludus, userid, f"Shared range for session {session_row.id}")
     ludus.range_deploy(
-        userid=userid,
+        range_id=userid,
         config_yaml=lab_template.range_config_yaml,
     )
 
-    # 3. The shared range is the lead user's range, identified by userID.
+    # 3. The shared range is the lead user's range, identified by rangeID.
     session_row.shared_range_id = userid
     _emit_event(
         db,
@@ -399,7 +414,7 @@ def _range_destroy_in_flight(ludus: LudusClient, userid: str) -> bool:
     as an op in flight. A missing range/user means nothing to collide with.
     """
     try:
-        info = ludus.range_get_vms(user_id=userid)
+        info = ludus.range_get_vms(range_id=userid)
     except LudusError:
         return False
     state = str(info.get("rangeState") or "").upper()
@@ -418,7 +433,7 @@ def _range_needs_deploy(ludus: LudusClient, userid: str) -> bool:
     actually deploying rather than silently skipping.
     """
     try:
-        info = ludus.range_get_vms(user_id=userid)
+        info = ludus.range_get_vms(range_id=userid)
     except LudusError:
         return True
     state = str(info.get("rangeState") or "").upper()
@@ -438,7 +453,7 @@ def _range_confirmed_up(ludus: LudusClient, userid: str) -> bool:
     flipping a student to ready.
     """
     try:
-        info = ludus.range_get_vms(user_id=userid)
+        info = ludus.range_get_vms(range_id=userid)
     except LudusError:
         return False
     state = str(info.get("rangeState") or "").upper()
@@ -541,8 +556,9 @@ def _provision_one(
         # we never mark students ready against an empty/never-deployed range.
         if not lead_range_deployed and _range_needs_deploy(ludus, userid):
             try:
+                _ensure_range(ludus, userid, f"Shared range for session {session_row.id}")
                 ludus.range_deploy(
-                    userid=userid,
+                    range_id=userid,
                     config_yaml=lab_template.range_config_yaml,
                 )
             except LudusError as exc:
@@ -567,30 +583,27 @@ def _provision_one(
                 reason="session.shared_range_id is None",
             )
             return False
-        # Ludus v1: grant this student's user access to the shared range,
-        # which is owned by the lead user (shared_range_id == lead userID).
+        # Assign this student's user access to the shared range, which is
+        # owned by the lead user (shared_range_id == lead userID == rangeID).
         try:
-            ludus.range_access_grant(
-                source_user_id=userid,
-                target_user_id=session_row.shared_range_id,
-            )
+            ludus.range_assign(userid, session_row.shared_range_id)
         except LudusError as exc:
             _mark_error(db, student, step="range_access_grant", reason=repr(exc))
             return False
         assigned_range_id = session_row.shared_range_id
     else:
         try:
+            _ensure_range(ludus, userid, f"Range for {student.full_name}")
             ludus.range_deploy(
-                userid=userid,
+                range_id=userid,
                 config_yaml=lab_template.range_config_yaml,
             )
         except LudusError as exc:
             _mark_error(db, student, step="range_deploy", reason=repr(exc))
             return False
-        # TODO: LudusClient.range_deploy currently returns None. Once
-        # Ludus exposes the newly-created range identifier via the
-        # deploy response, surface it here instead of leaving None.
-        assigned_range_id = None
+        # This platform's 1:1 convention: a dedicated student's rangeID is
+        # always its own Ludus userID.
+        assigned_range_id = userid
 
     # 3. user_wireguard -> raw .conf text.
     try:
@@ -719,8 +732,8 @@ def provision_session(
         logger.info("provision: session id=%s has no students, nothing to do", session_id)
         return result
 
-    # On Ludus v1 the shared range is simply the lead user's range, keyed by
-    # that user's ID; there is no rangeID/rangeNumber to resolve.
+    # This platform's convention: the shared range is simply the lead
+    # user's range, keyed by that user's ID (== rangeID).
     lead_userid: str | None = None
     # Whether the lead's shared range is already live. Auto-create fires a
     # deploy, so it is True there; a pre-existing owner range that was picked

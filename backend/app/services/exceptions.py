@@ -28,6 +28,10 @@ class LudusUserExists(LudusError):  # noqa: N818 - spec-mandated name
     """Raised when Ludus returns HTTP 409 (typically on user creation)."""
 
 
+class LudusRangeExists(LudusError):  # noqa: N818 - spec-mandated name
+    """Raised when ``POST /ranges/create`` reports the rangeID already exists."""
+
+
 class LudusNotFound(LudusError):  # noqa: N818 - spec-mandated name
     """Raised when Ludus returns HTTP 404 (user, range, or snapshot missing)."""
 
@@ -37,11 +41,9 @@ class LudusTimeout(LudusError):  # noqa: N818 - spec-mandated name
 
 
 class LudusNotSupported(LudusError):  # noqa: N818 - spec-mandated name
-    """Raised when an operation is not available on the target Ludus version.
+    """Raised when an operation has no equivalent in the Ludus v2 OpenAPI spec.
 
-    Ludus v1 (1.11.x) lacks several endpoints that newer releases added
-    (groups, multi-range create/assign, blueprints, whoami, log history,
-    subscription roles, role scope, per-VM delete). The client raises this
-    instead of issuing a request that would 404, so callers and the UI can
-    surface a clear "not supported on this Ludus version" message.
+    Currently only the subscription-roles endpoints fall in this bucket -
+    everything else v1 lacked (groups, multi-range create/assign, whoami,
+    log history, role scope/vars, per-VM delete) is implemented for real.
     """

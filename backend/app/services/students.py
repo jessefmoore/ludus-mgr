@@ -354,7 +354,7 @@ def reset_student(
             raise ResetCooldown(f"Reset cooldown: wait {int(remaining.total_seconds())} seconds")
 
     try:
-        ludus_client.snapshot_revert(snapshot_name, user_id=student.ludus_userid)
+        ludus_client.snapshot_revert(snapshot_name, range_id=student.ludus_userid)
     except LudusError as exc:
         logger.warning(
             "student.reset: ludus snapshot_revert failed for %s: %s",
@@ -388,11 +388,11 @@ def remove_student_range(
     ludus_client: LudusClient,
     student_id: int,
 ) -> Student:
-    """Destroy a student's range VMs but KEEP the Ludus user.
+    """Delete a student's range but KEEP the Ludus user.
 
-    Equivalent to ``ludus range rm --user <userID>``: the range is torn down
-    (so a fresh one can be deployed for the same user later) while the user,
-    invite and WireGuard config are preserved. The student flips back to
+    The range is deleted (so a fresh one can be re-created for the same user
+    later via ``range_create``) while the user, invite and WireGuard config
+    are preserved. The student flips back to
     ``pending`` so a re-provision rebuilds the range; a never-provisioned
     (``pending``) student is a no-op.
 
@@ -408,7 +408,7 @@ def remove_student_range(
         return student  # nothing deployed - idempotent no-op
 
     try:
-        ludus_client.range_destroy(user_id=student.ludus_userid, force=True)
+        ludus_client.range_destroy(range_id=student.ludus_userid, force=True)
     except LudusNotFound:
         logger.info("student.range_remove: range for %s already gone", student.ludus_userid)
     except LudusError as exc:

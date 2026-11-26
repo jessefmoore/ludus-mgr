@@ -1,8 +1,9 @@
-"""Unit tests for `app.services.ludus.LudusClient` against the Ludus v1 contract.
+"""Unit tests for `app.services.ludus.LudusClient` against the Ludus v2 contract.
 
-Ludus v1 (1.11.x) serves bare routes (no /api/v2 prefix), addresses ranges by
-``?userID=``, shares ranges via POST /range/access, and lacks a number of
-endpoints that newer Ludus versions added. These tests pin that contract.
+Ludus v2 serves bare routes (no version prefix), addresses ranges by
+``?rangeID=`` (independent of their owning user), shares ranges via
+``/ranges/assign``/``/ranges/revoke``, and adds groups/whoami/log-history/
+role-vars/role-scope/per-VM-delete endpoints that v1 lacked.
 
 Uses pytest-httpx's ``httpx_mock`` fixture to intercept outbound requests.
 """
@@ -19,6 +20,7 @@ from app.services.exceptions import (
     LudusError,
     LudusNotFound,
     LudusNotSupported,
+    LudusRangeExists,
     LudusUserExists,
 )
 from app.services.ludus import API_BASE, LudusClient
@@ -41,7 +43,7 @@ def _url(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# v1 uses bare routes (no /api/v2 prefix)
+# v2 uses bare routes (no version prefix)
 # ---------------------------------------------------------------------------
 
 
@@ -54,7 +56,7 @@ def test_routes_are_bare(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     client.user_list()
     sent = httpx_mock.get_request()
     assert sent is not None
-    assert sent.url.path == "/user/all"  # not /api/v2/user/all
+    assert sent.url.path == "/user/all"
     assert sent.headers["X-API-KEY"] == API_KEY
 
 
@@ -79,6 +81,16 @@ def test_user_add_success(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     body = sent.read().decode()
     assert '"userID": "alice"' in body or '"userID":"alice"' in body
     assert "alice@example.com" in body
+
+
+def test_user_add_with_password(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="POST", url=_url("/user"), status_code=201,
+        json={"userID": "alice", "name": "Alice", "isAdmin": False},
+    )
+    client.user_add("alice", "Alice", "alice@example.com", password="s3cret")
+    body = httpx_mock.get_request().read().decode()
+    assert "s3cret" in body
 
 
 def test_user_add_conflict_raises_exists(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -130,9 +142,17 @@ def test_user_rm_success(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     assert httpx_mock.get_request() is not None
 
 
+def test_user_rm_delete_range(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="DELETE", url=_url("/user/alice?deleteDefaultRange=true"), json={}
+    )
+    client.user_rm("alice", delete_range=True)
+    assert httpx_mock.get_request().url.params["deleteDefaultRange"] == "true"
+
+
 def test_user_writes_use_admin_url(httpx_mock: HTTPXMock) -> None:
-    # On Ludus v1, user create/delete must hit the admin API (:8081), while
-    # everything else uses the primary URL (:8080).
+    # Some Ludus deployments still split user create/delete onto a dedicated
+    # admin API (:8081), while everything else uses the primary URL (:8080).
     admin = "https://ludus.test:8081"
     c = LudusClient(url=BASE_URL, api_key=API_KEY, verify_tls=False, admin_url=admin)
     try:
@@ -184,104 +204,178 @@ def test_user_wireguard_raw_text_fallback(client: LudusClient, httpx_mock: HTTPX
     assert client.user_wireguard("JM").startswith("[Interface]")
 
 
-# ---------------------------------------------------------------------------
-# range sharing via /range/access (v1 replacement for /ranges/assign)
-# ---------------------------------------------------------------------------
-
-
-def test_range_access_grant_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/range/access"), json={"result": "ok"})
-    client.range_access_grant("STU1", "LEAD")
-    sent = httpx_mock.get_request()
-    assert sent.url.path == "/range/access"
-    body = sent.read().decode()
-    assert '"action": "grant"' in body or '"action":"grant"' in body
-    assert "STU1" in body and "LEAD" in body
-    assert '"sourceUserID"' in body and '"targetUserID"' in body
-
-
-def test_range_access_revoke_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/range/access"), json={"result": "ok"})
-    client.range_access_revoke("STU1", "LEAD")
-    body = httpx_mock.get_request().read().decode()
-    assert '"action": "revoke"' in body or '"action":"revoke"' in body
-
-
-def test_range_access_list(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+def test_user_default_range_get(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/range/access"),
-        json=[{"targetUserID": "LEAD", "sourceUserIDs": ["STU1", "STU2"]}],
+        method="GET", url=_url("/user/default-range"), json={"defaultRangeID": "JM"}
     )
-    accesses = client.range_access_list()
-    assert accesses[0]["targetUserID"] == "LEAD"
+    assert client.user_default_range_get() == "JM"
+
+
+def test_user_default_range_set(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="POST", url=_url("/user/default-range"), json={"defaultRangeID": "JM"}
+    )
+    client.user_default_range_set("JM")
+    assert "JM" in httpx_mock.get_request().read().decode()
 
 
 # ---------------------------------------------------------------------------
-# range deploy / config / lifecycle (keyed by ?userID=)
+# identity
+# ---------------------------------------------------------------------------
+
+
+def test_whoami(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET", url=_url("/whoami"),
+        json={"user": {"userID": "JM"}, "range": {"rangeID": "JM"}},
+    )
+    data = client.whoami()
+    assert data["user"]["userID"] == "JM"
+
+
+# ---------------------------------------------------------------------------
+# range creation / sharing (v2)
+# ---------------------------------------------------------------------------
+
+
+def test_range_create_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="POST", url=_url("/ranges/create"), status_code=201,
+        json={"result": {"rangeID": "JM", "rangeNumber": 2}},
+    )
+    result = client.range_create("Student range", "JM", user_ids=["JM"])
+    assert result["rangeID"] == "JM"
+    body = httpx_mock.get_request().read().decode()
+    assert '"rangeID": "JM"' in body or '"rangeID":"JM"' in body
+    assert "JM" in body
+
+
+def test_range_create_conflict_raises_exists(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="POST", url=_url("/ranges/create"), status_code=400,
+        json={"error": "Range with that ID already exists"},
+    )
+    with pytest.raises(LudusRangeExists):
+        client.range_create("Student range", "JM")
+
+
+def test_range_assign(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="POST", url=_url("/ranges/assign/STU1/LEAD"), json={})
+    client.range_assign("STU1", "LEAD")
+    sent = httpx_mock.get_request()
+    assert sent.url.path == "/ranges/assign/STU1/LEAD"
+
+
+def test_range_revoke(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="DELETE", url=_url("/ranges/revoke/STU1/LEAD?force=true"), json={}
+    )
+    client.range_revoke("STU1", "LEAD", force=True)
+    sent = httpx_mock.get_request()
+    assert sent.url.path == "/ranges/revoke/STU1/LEAD"
+    assert sent.url.params["force"] == "true"
+
+
+def test_range_users(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET", url=_url("/ranges/LEAD/users"), json=[{"userID": "STU1"}]
+    )
+    users = client.range_users("LEAD")
+    assert users[0]["userID"] == "STU1"
+
+
+def test_ranges_accessible(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET", url=_url("/ranges/accessible"),
+        json=[{"rangeID": "JM", "rangeNumber": 2, "accessType": "Direct"}],
+    )
+    ranges = client.ranges_accessible()
+    assert ranges[0]["rangeID"] == "JM"
+
+
+# ---------------------------------------------------------------------------
+# range deploy / config / lifecycle (keyed by ?rangeID=)
 # ---------------------------------------------------------------------------
 
 
 def test_range_deploy_two_steps(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="PUT", url=_url("/range/config?userID=JM"), json={})
-    httpx_mock.add_response(method="POST", url=_url("/range/deploy?userID=JM"), json={})
+    httpx_mock.add_response(method="PUT", url=_url("/range/config?rangeID=JM"), json={})
+    httpx_mock.add_response(method="POST", url=_url("/range/deploy?rangeID=JM"), json={})
     client.range_deploy("JM", "ludus:\n  - vm_name: x\n")
     reqs = httpx_mock.get_requests()
     assert reqs[0].method == "PUT" and reqs[0].url.path == "/range/config"
     assert reqs[1].method == "POST" and reqs[1].url.path == "/range/deploy"
-    assert reqs[0].url.params["userID"] == "JM"
+    assert reqs[0].url.params["rangeID"] == "JM"
 
 
 def test_range_deploy_existing(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/range/deploy?userID=JM"), json={})
-    client.range_deploy_existing(user_id="JM")
-    assert httpx_mock.get_request().url.params["userID"] == "JM"
+    httpx_mock.add_response(method="POST", url=_url("/range/deploy?rangeID=JM"), json={})
+    client.range_deploy_existing(range_id="JM")
+    assert httpx_mock.get_request().url.params["rangeID"] == "JM"
+
+
+def test_range_deploy_existing_with_tags_and_force(
+    client: LudusClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(method="POST", url=_url("/range/deploy?rangeID=JM"), json={})
+    client.range_deploy_existing(range_id="JM", tags="dc", force=True, limit="JM-kali1")
+    body = httpx_mock.get_request().read().decode()
+    assert '"tags"' in body and "dc" in body
+    assert '"force": true' in body or '"force":true' in body
+    assert "JM-kali1" in body
 
 
 def test_range_list(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
         method="GET", url=_url("/range/all"),
-        json=[{"userID": "JM", "rangeNumber": 2, "rangeState": "SUCCESS"}],
+        json=[{"rangeID": "JM", "rangeNumber": 2, "rangeState": "SUCCESS"}],
     )
     ranges = client.range_list()
-    assert ranges[0]["userID"] == "JM"
+    assert ranges[0]["rangeID"] == "JM"
     assert ranges[0]["rangeNumber"] == 2
 
 
 def test_range_get_config_result_envelope(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/range/config?userID=JM"),
+        method="GET", url=_url("/range/config?rangeID=JM"),
         json={"result": "ludus:\n  - vm_name: dc\n"},
     )
-    cfg = client.range_get_config(user_id="JM")
+    cfg = client.range_get_config(range_id="JM")
     assert cfg.startswith("ludus:")
 
 
 def test_range_get_vms_returns_single_object(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/range?userID=JM"),
+        method="GET", url=_url("/range?rangeID=JM"),
         json={
-            "userID": "JM", "rangeNumber": 2, "numberOfVMs": 1,
+            "rangeID": "JM", "rangeNumber": 2, "numberOfVMs": 1,
             "VMs": [{"ID": 3969, "proxmoxID": 114, "name": "dc", "poweredOn": True, "ip": "10.2.10.5"}],
         },
     )
-    detail = client.range_get_vms(user_id="JM")
+    detail = client.range_get_vms(range_id="JM")
     assert isinstance(detail, dict)
-    assert detail["userID"] == "JM"
+    assert detail["rangeID"] == "JM"
     assert detail["VMs"][0]["proxmoxID"] == 114
 
 
-def test_range_destroy_userid_and_force(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="DELETE", url=_url("/range?userID=JM&force=true"), json={})
-    client.range_destroy(user_id="JM", force=True)
+def test_range_destroy_rangeid_and_force(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="DELETE", url=_url("/range?rangeID=JM&force=true"), json={})
+    client.range_destroy(range_id="JM", force=True)
     sent = httpx_mock.get_request()
-    assert sent.url.params["userID"] == "JM"
+    assert sent.url.params["rangeID"] == "JM"
     assert sent.url.params["force"] == "true"
 
 
+def test_range_delete_vms(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="DELETE", url=_url("/range/JM/vms"), json={})
+    client.range_delete_vms("JM")
+    assert httpx_mock.get_request().url.path == "/range/JM/vms"
+
+
 def test_range_abort(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/range/abort?userID=JM"), json={"result": "ok"})
-    client.range_abort(user_id="JM")
-    assert httpx_mock.get_request().url.params["userID"] == "JM"
+    httpx_mock.add_response(method="POST", url=_url("/range/abort?rangeID=JM"), json={"result": "ok"})
+    client.range_abort(range_id="JM")
+    assert httpx_mock.get_request().url.params["rangeID"] == "JM"
 
 
 def test_range_tags(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -302,30 +396,30 @@ def test_range_config_example(client: LudusClient, httpx_mock: HTTPXMock) -> Non
 
 
 def test_range_power_on(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="PUT", url=_url("/range/poweron?userID=JM"), json={})
-    client.range_power_on("JM", machines=["dc"])
+    httpx_mock.add_response(method="PUT", url=_url("/range/poweron?rangeID=JM"), json={})
+    client.range_power_on(range_id="JM", machines=["dc"])
     sent = httpx_mock.get_request()
-    assert sent.url.params["userID"] == "JM"
+    assert sent.url.params["rangeID"] == "JM"
     assert '"dc"' in sent.read().decode()
 
 
 def test_range_power_off_default_all(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="PUT", url=_url("/range/poweroff?userID=JM"), json={})
-    client.range_power_off("JM")
+    httpx_mock.add_response(method="PUT", url=_url("/range/poweroff?rangeID=JM"), json={})
+    client.range_power_off(range_id="JM")
     assert '"all"' in httpx_mock.get_request().read().decode()
 
 
 # ---------------------------------------------------------------------------
-# snapshots (v1 wraps list in {"snapshots": [...]})
+# snapshots (v2 wraps list in {"snapshots": [...]})
 # ---------------------------------------------------------------------------
 
 
 def test_snapshot_list_unwraps_snapshots(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/snapshots/list?userID=JM"),
+        method="GET", url=_url("/snapshots/list?rangeID=JM"),
         json={"errors": None, "snapshots": [{"name": "before", "vmid": 114}]},
     )
-    snaps = client.snapshot_list(user_id="JM")
+    snaps = client.snapshot_list(range_id="JM")
     assert isinstance(snaps, list)
     assert snaps[0]["name"] == "before"
 
@@ -334,14 +428,14 @@ def test_snapshot_list_empty_when_no_snapshots_key(
     client: LudusClient, httpx_mock: HTTPXMock
 ) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/snapshots/list?userID=JM"), json={"errors": None}
+        method="GET", url=_url("/snapshots/list?rangeID=JM"), json={"errors": None}
     )
-    assert client.snapshot_list(user_id="JM") == []
+    assert client.snapshot_list(range_id="JM") == []
 
 
 def test_snapshot_create_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/snapshots/create?userID=JM"), json={"result": "ok"})
-    client.snapshot_create("snap1", user_id="JM", description="d", include_ram=False, vmids=[114])
+    httpx_mock.add_response(method="POST", url=_url("/snapshots/create?rangeID=JM"), json={"result": "ok"})
+    client.snapshot_create("snap1", range_id="JM", description="d", include_ram=False, vmids=[114])
     body = httpx_mock.get_request().read().decode()
     assert '"name": "snap1"' in body or '"name":"snap1"' in body
     assert '"includeRAM": false' in body or '"includeRAM":false' in body
@@ -349,52 +443,52 @@ def test_snapshot_create_body(client: LudusClient, httpx_mock: HTTPXMock) -> Non
 
 
 def test_snapshot_revert_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/snapshots/rollback?userID=JM"), json={})
-    client.snapshot_revert("snap1", user_id="JM")
+    httpx_mock.add_response(method="POST", url=_url("/snapshots/rollback?rangeID=JM"), json={})
+    client.snapshot_revert("snap1", range_id="JM")
     sent = httpx_mock.get_request()
     assert sent.url.path == "/snapshots/rollback"
     assert "snap1" in sent.read().decode()
 
 
 def test_snapshot_delete_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/snapshots/remove?userID=JM"), json={})
-    client.snapshot_delete("snap1", user_id="JM")
+    httpx_mock.add_response(method="POST", url=_url("/snapshots/remove?rangeID=JM"), json={})
+    client.snapshot_delete("snap1", range_id="JM")
     assert httpx_mock.get_request().url.path == "/snapshots/remove"
 
 
 # ---------------------------------------------------------------------------
-# testing (keyed by ?userID=, no range_id)
+# testing (keyed by ?rangeID=)
 # ---------------------------------------------------------------------------
 
 
 def test_testing_start(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="PUT", url=_url("/testing/start?userID=JM"), json={"result": "ok"})
-    client.testing_start(user_id="JM")
-    assert httpx_mock.get_request().url.params["userID"] == "JM"
+    httpx_mock.add_response(method="PUT", url=_url("/testing/start?rangeID=JM"), json={"result": "ok"})
+    client.testing_start(range_id="JM")
+    assert httpx_mock.get_request().url.params["rangeID"] == "JM"
 
 
 def test_testing_stop_force(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="PUT", url=_url("/testing/stop?userID=JM"), json={"result": "ok"})
-    client.testing_stop(user_id="JM", force=True)
+    httpx_mock.add_response(method="PUT", url=_url("/testing/stop?rangeID=JM"), json={"result": "ok"})
+    client.testing_stop(range_id="JM", force=True)
     assert '"force":true' in httpx_mock.get_request().read().decode()
 
 
 def test_testing_allow_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/testing/allow?userID=JM"), json={})
-    client.testing_allow(user_id="JM", domains=["example.com"], ips=["1.2.3.4"])
+    httpx_mock.add_response(method="POST", url=_url("/testing/allow?rangeID=JM"), json={})
+    client.testing_allow(range_id="JM", domains=["example.com"], ips=["1.2.3.4"])
     body = httpx_mock.get_request().read().decode()
     assert "example.com" in body and "1.2.3.4" in body
 
 
 def test_testing_deny_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/testing/deny?userID=JM"), json={})
-    client.testing_deny(user_id="JM", domains=["evil.com"])
+    httpx_mock.add_response(method="POST", url=_url("/testing/deny?rangeID=JM"), json={})
+    client.testing_deny(range_id="JM", domains=["evil.com"])
     assert "evil.com" in httpx_mock.get_request().read().decode()
 
 
 def test_testing_update(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/testing/update?userID=JM"), json={})
-    client.testing_update("dc", user_id="JM")
+    httpx_mock.add_response(method="POST", url=_url("/testing/update?rangeID=JM"), json={})
+    client.testing_update("dc", range_id="JM")
     assert "dc" in httpx_mock.get_request().read().decode()
 
 
@@ -443,15 +537,33 @@ def test_template_delete(client: LudusClient, httpx_mock: HTTPXMock) -> None:
 
 
 def test_range_logs(client: LudusClient, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(method="GET", url=_url("/range/logs?userID=JM"), json={"result": "..."})
-    assert client.range_logs(user_id="JM")["result"] == "..."
+    httpx_mock.add_response(method="GET", url=_url("/range/logs?rangeID=JM"), json={"result": "..."})
+    assert client.range_logs(range_id="JM")["result"] == "..."
+
+
+def test_range_logs_history(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET", url=_url("/range/logs/history?rangeID=JM"),
+        json=[{"id": "abc123", "status": "success"}],
+    )
+    entries = client.range_logs_history(range_id="JM")
+    assert entries[0]["id"] == "abc123"
+
+
+def test_range_log_entry(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET", url=_url("/range/logs/history/abc123?rangeID=JM"),
+        json={"id": "abc123", "result": "log text"},
+    )
+    entry = client.range_log_entry("abc123", range_id="JM")
+    assert entry["result"] == "log text"
 
 
 def test_range_etchosts(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/range/etchosts?userID=JM"), json={"result": "10.2.10.5 dc"}
+        method="GET", url=_url("/range/etchosts?rangeID=JM"), json={"result": "10.2.10.5 dc"}
     )
-    assert "dc" in client.range_etchosts(user_id="JM")
+    assert "dc" in client.range_etchosts(range_id="JM")
 
 
 def test_range_sshconfig(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -461,16 +573,16 @@ def test_range_sshconfig(client: LudusClient, httpx_mock: HTTPXMock) -> None:
 
 def test_range_rdpconfigs_bytes(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/range/rdpconfigs?userID=JM"), content=b"PK\x03\x04zip",
+        method="GET", url=_url("/range/rdpconfigs?rangeID=JM"), content=b"PK\x03\x04zip",
     )
-    assert client.range_rdpconfigs(user_id="JM") == b"PK\x03\x04zip"
+    assert client.range_rdpconfigs(range_id="JM") == b"PK\x03\x04zip"
 
 
 def test_range_ansibleinventory(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/range/ansibleinventory?userID=JM"), json={"result": "all:\n"}
+        method="GET", url=_url("/range/ansibleinventory?rangeID=JM"), json={"result": "all:\n"}
     )
-    assert client.range_ansibleinventory(user_id="JM").startswith("all:")
+    assert client.range_ansibleinventory(range_id="JM").startswith("all:")
 
 
 # ---------------------------------------------------------------------------
@@ -503,25 +615,137 @@ def test_ansible_role_from_tar(client: LudusClient, httpx_mock: HTTPXMock) -> No
     assert httpx_mock.get_request().url.path == "/ansible/role/fromtar"
 
 
-def test_ansible_scope_roles_global_installs_each(
+def test_ansible_role_vars(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="POST", url=_url("/ansible/role/vars"),
+        json={"roles": [{"name": "geerlingguy.docker", "global": False, "vars": {"x": 1}}]},
+    )
+    roles = client.ansible_role_vars(["geerlingguy.docker"])
+    assert roles[0]["name"] == "geerlingguy.docker"
+    assert "geerlingguy.docker" in httpx_mock.get_request().read().decode()
+
+
+def test_ansible_role_scope(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="PATCH", url=_url("/ansible/role/scope"),
+        json={"success": ["role1"], "errors": []},
+    )
+    result = client.ansible_role_scope(["role1"], global_=True, copy_roles=True)
+    assert result["success"] == ["role1"]
+    body = httpx_mock.get_request().read().decode()
+    assert '"global": true' in body or '"global":true' in body
+    assert '"copy": true' in body or '"copy":true' in body
+
+
+def test_ansible_scope_roles_global_uses_role_scope(
     client: LudusClient, httpx_mock: HTTPXMock
 ) -> None:
-    httpx_mock.add_response(method="POST", url=_url("/ansible/role"), json={"result": "ok"})
-    httpx_mock.add_response(method="POST", url=_url("/ansible/role"), json={"result": "ok"})
+    httpx_mock.add_response(
+        method="PATCH", url=_url("/ansible/role/scope"),
+        json={"success": ["role1", "role2"], "errors": []},
+    )
     client.ansible_scope_roles_global(["role1", "role2"])
-    reqs = httpx_mock.get_requests()
-    assert len(reqs) == 2
-    for r in reqs:
-        assert '"global": true' in r.read().decode() or '"global":true' in r.read().decode()
+    body = httpx_mock.get_request().read().decode()
+    assert "role1" in body and "role2" in body
+    assert '"global": true' in body or '"global":true' in body
 
 
 def test_ansible_scope_roles_global_propagates_failure(
     client: LudusClient, httpx_mock: HTTPXMock
 ) -> None:
-    # A failing role propagates so provisioning can record it as non-fatal.
-    httpx_mock.add_response(method="POST", url=_url("/ansible/role"), status_code=500, json={"error": "x"})
+    # A failing call propagates so provisioning can record it as non-fatal.
+    httpx_mock.add_response(
+        method="PATCH", url=_url("/ansible/role/scope"), status_code=500, json={"error": "x"}
+    )
     with pytest.raises(LudusError):
         client.ansible_scope_roles_global(["role1"])
+
+
+# ---------------------------------------------------------------------------
+# groups (v2)
+# ---------------------------------------------------------------------------
+
+
+def test_group_list(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="GET", url=_url("/groups"), json=[{"name": "red-team"}])
+    assert client.group_list()[0]["name"] == "red-team"
+
+
+def test_group_create(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="POST", url=_url("/groups"), status_code=201, json={"result": "ok"})
+    client.group_create("red-team", description="Red team")
+    body = httpx_mock.get_request().read().decode()
+    assert "red-team" in body and "Red team" in body
+
+
+def test_group_delete(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="DELETE", url=_url("/groups/red-team"), json={})
+    client.group_delete("red-team")
+    assert httpx_mock.get_request().url.path == "/groups/red-team"
+
+
+def test_group_users(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET", url=_url("/groups/red-team/users"),
+        json=[{"userID": "JM", "role": "manager"}],
+    )
+    users = client.group_users("red-team")
+    assert users[0]["role"] == "manager"
+
+
+def test_group_add_users_with_managers(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="POST", url=_url("/groups/red-team/users"),
+        json={"success": ["JM", "BOB"], "errors": []},
+    )
+    result = client.group_add_users("red-team", ["JM", "BOB"], managers=["JM"])
+    assert result["success"] == ["JM", "BOB"]
+    body = httpx_mock.get_request().read().decode()
+    assert '"userIDs"' in body and '"managers"' in body
+
+
+def test_group_remove_users(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="DELETE", url=_url("/groups/red-team/users"), json={"success": ["JM"], "errors": []}
+    )
+    client.group_remove_users("red-team", ["JM"])
+    assert "JM" in httpx_mock.get_request().read().decode()
+
+
+def test_group_ranges(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="GET", url=_url("/groups/red-team/ranges"), json=[{"rangeID": "JM"}]
+    )
+    assert client.group_ranges("red-team")[0]["rangeID"] == "JM"
+
+
+def test_group_add_ranges(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="POST", url=_url("/groups/red-team/ranges"),
+        json={"success": ["JM"], "errors": []},
+    )
+    client.group_add_ranges("red-team", ["JM"])
+    assert '"rangeIDs"' in httpx_mock.get_request().read().decode()
+
+
+def test_group_remove_ranges(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        method="DELETE", url=_url("/groups/red-team/ranges"),
+        json={"success": ["JM"], "errors": []},
+    )
+    client.group_remove_ranges("red-team", ["JM"])
+    assert '"rangeIDs"' in httpx_mock.get_request().read().decode()
+
+
+# ---------------------------------------------------------------------------
+# VM management (v2)
+# ---------------------------------------------------------------------------
+
+
+def test_vm_destroy(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(method="DELETE", url=_url("/vm/114"), json={"result": "ok"})
+    client.vm_destroy(114)
+    assert httpx_mock.get_request().url.path == "/vm/114"
 
 
 # ---------------------------------------------------------------------------
@@ -537,10 +761,10 @@ def test_auth_error_401(client: LudusClient, httpx_mock: HTTPXMock) -> None:
 
 def test_not_found_404(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        method="GET", url=_url("/range/config?userID=NOPE"), status_code=404, json={"error": "no range"}
+        method="GET", url=_url("/range/config?rangeID=NOPE"), status_code=404, json={"error": "no range"}
     )
     with pytest.raises(LudusNotFound):
-        client.range_get_config(user_id="NOPE")
+        client.range_get_config(range_id="NOPE")
 
 
 def test_generic_error_500(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -550,36 +774,15 @@ def test_generic_error_500(client: LudusClient, httpx_mock: HTTPXMock) -> None:
 
 
 # ---------------------------------------------------------------------------
-# operations NOT supported on Ludus v1 -> LudusNotSupported (no HTTP call)
+# operations with no v2 equivalent -> LudusNotSupported (no HTTP call)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "call",
     [
-        lambda c: c.range_assign("u", "r"),
-        lambda c: c.range_revoke("u", "r"),
-        lambda c: c.range_users("r"),
-        lambda c: c.range_create("name", 1),
-        lambda c: c.ranges_accessible(),
-        lambda c: c.range_delete_vms(1),
-        lambda c: c.vm_destroy(1),
-        lambda c: c.range_logs_history(),
-        lambda c: c.range_log_entry(1),
-        lambda c: c.whoami(),
-        lambda c: c.group_create("g"),
-        lambda c: c.group_list(),
-        lambda c: c.group_delete("g"),
-        lambda c: c.group_users("g"),
-        lambda c: c.group_add_users("g", ["u"]),
-        lambda c: c.group_remove_users("g", ["u"]),
-        lambda c: c.group_ranges("g"),
-        lambda c: c.group_add_ranges("g", [1]),
-        lambda c: c.group_remove_ranges("g", [1]),
         lambda c: c.ansible_subscription_roles(),
         lambda c: c.ansible_install_subscription_roles(["r"]),
-        lambda c: c.ansible_role_vars(["r"]),
-        lambda c: c.ansible_role_scope(["r"], global_=True),
     ],
 )
 def test_unsupported_operations_raise(client: LudusClient, call) -> None:

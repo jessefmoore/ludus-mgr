@@ -36,12 +36,12 @@ class FakeLudus:
         self.create_error: Exception | None = None
 
     def range_list(self) -> list[dict]:
-        return [{"userID": uid, "rangeState": st} for uid, st in self.states.items()]
+        return [{"rangeID": uid, "rangeState": st} for uid, st in self.states.items()]
 
-    def snapshot_create(self, name, *, user_id=None, description="", include_ram=True, vmids=None):
+    def snapshot_create(self, name, *, range_id=None, description="", include_ram=True, vmids=None):
         if self.create_error is not None:
             raise self.create_error
-        self.snapshot_calls.append((name, user_id))
+        self.snapshot_calls.append((name, range_id))
         return {"result": "ok"}
 
 

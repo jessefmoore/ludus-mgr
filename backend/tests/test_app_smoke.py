@@ -41,27 +41,25 @@ class FakeLudus:
     def range_list(self) -> list[dict]:
         return []
 
-    def range_access_grant(
-        self, source_user_id: str, target_user_id: str, *, force: bool = False
-    ) -> dict:
-        # v1 range sharing (replaces range_assign).
-        self.range_assign_calls.append(
-            {"userid": source_user_id, "range_id": target_user_id}
-        )
+    def range_create(self, name: str, range_id: str, *, user_ids: list[str] | None = None, **_: Any) -> dict:
+        return {"rangeID": range_id}
+
+    def range_assign(self, user_id: str, range_id: str) -> dict:
+        self.range_assign_calls.append({"userid": user_id, "range_id": range_id})
         return {"result": "ok"}
 
     def ansible_scope_roles_global(self, roles: list[str], *, force: bool = False) -> None:
-        # v1 global role scoping (replaces ansible_role_scope); no-op for smoke.
+        # Global role scoping via role/scope; no-op for smoke.
         return None
 
-    def range_deploy(self, userid: str, config_yaml: str) -> None:
-        self.range_deploy_calls.append({"userid": userid, "config_yaml": config_yaml})
+    def range_deploy(self, range_id: str, config_yaml: str) -> None:
+        self.range_deploy_calls.append({"userid": range_id, "config_yaml": config_yaml})
 
-    def range_get_vms(self, *, user_id: str) -> dict:
+    def range_get_vms(self, *, range_id: str) -> dict:
         # The picked shared range ("DEMO") is already live and powered on, so
         # the owner-as-lead path reuses it and students land in ``ready``.
         return {
-            "userID": user_id,
+            "rangeID": range_id,
             "rangeState": "SUCCESS",
             "VMs": [{"name": "DEMO-DC", "poweredOn": True}],
         }

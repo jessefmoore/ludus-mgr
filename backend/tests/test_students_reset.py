@@ -61,10 +61,9 @@ class FakeLudus:
         self.snapshot_revert_exc: Exception | None = None
 
     def snapshot_revert(
-        self, name: str, *, user_id: str | None = None, vmids: list[int] | None = None
+        self, name: str, *, range_id: str | None = None, vmids: list[int] | None = None
     ) -> None:
-        # Ludus v1 signature: snapshot_revert(name, *, user_id=...).
-        self.snapshot_revert_calls.append((user_id, name))
+        self.snapshot_revert_calls.append((range_id, name))
         if self.snapshot_revert_exc is not None:
             raise self.snapshot_revert_exc
 

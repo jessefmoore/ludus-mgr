@@ -61,7 +61,7 @@ from app.schemas.ludus import (
     UserCreateResponse,
 )
 from app.services import capacity as capacity_service
-from app.services.exceptions import LudusError, LudusNotFound, LudusUserExists
+from app.services.exceptions import LudusError, LudusNotFound, LudusRangeExists, LudusUserExists
 from app.services.ludus import LudusClient
 
 logger = logging.getLogger(__name__)
@@ -78,34 +78,6 @@ def _resolve_client(registry: LudusClientRegistry, server: str) -> LudusClient:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-
-
-def _resolve_userid(
-    ludus: LudusClient,
-    *,
-    user_id: str | None = None,
-    range_number: int | None = None,
-) -> str | None:
-    """Map a range identifier to the owning user's ID (Ludus v1 model).
-
-    Ludus v1 addresses a range by its owner's ``userID``. Routes that still
-    accept a numeric ``range_number`` (for URL compatibility) resolve it to
-    the owning userID via ``/range/all``. An explicit ``user_id`` always wins.
-    Returns ``None`` when neither is provided (acts as the API key's own user).
-    """
-    if user_id:
-        return user_id
-    if range_number is not None:
-        for r in ludus.range_list():
-            if r.get("rangeNumber") == range_number:
-                owner = r.get("userID")
-                if owner:
-                    return owner
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No range found with number {range_number}",
-        )
-    return None
 
 
 @router.get("/ranges", response_model=LudusRangeListResponse)
@@ -158,31 +130,30 @@ def get_host_capacity(
     )
 
 
-@router.get("/ranges/{range_number}/config", response_model=LudusRangeConfigResponse)
+@router.get("/ranges/{range_id}/config", response_model=LudusRangeConfigResponse)
 def get_range_config(
-    range_number: int,
+    range_id: str,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
     registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
 ) -> LudusRangeConfigResponse:
-    """Fetch the range-config YAML for a range by its number."""
+    """Fetch the range-config YAML for a range by its rangeID."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, range_number=range_number)
-        config_yaml = ludus.range_get_config(user_id=owner)
+        config_yaml = ludus.range_get_config(range_id=range_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Range config not found for range {range_number}",
+            detail=f"Range config not found for range {range_id}",
         ) from exc
     except LudusError as exc:
-        logger.warning("Ludus range_get_config(range_number=%d) failed: %s", range_number, exc)
+        logger.warning("Ludus range_get_config(range_id=%s) failed: %s", range_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Ludus error: {exc}",
         ) from exc
 
-    return LudusRangeConfigResponse(range_number=range_number, config_yaml=config_yaml)
+    return LudusRangeConfigResponse(range_id=range_id, config_yaml=config_yaml)
 
 
 @router.get("/users", response_model=LudusUserListResponse)
@@ -288,25 +259,25 @@ def get_user_wireguard(
     )
 
 
-@router.post("/ranges/{range_number}/deploy", response_model=LudusActionResponse)
+@router.post("/ranges/{range_id}/deploy", response_model=LudusActionResponse)
 def deploy_range(
-    range_number: int,
+    range_id: str,
     body: DeployRequest,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
     registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
 ) -> LudusActionResponse:
-    """Deploy an already-configured range by its number."""
+    """Deploy an already-configured range by its rangeID."""
     ludus = _resolve_client(registry, server)
     try:
-        ludus.range_deploy_existing(user_id=body.user_id)
+        ludus.range_deploy_existing(range_id=range_id, user_id=body.user_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Range {range_number} not found",
+            detail=f"Range {range_id} not found",
         ) from exc
     except LudusError as exc:
-        logger.warning("Ludus range_deploy_existing(range_number=%d) failed: %s", range_number, exc)
+        logger.warning("Ludus range_deploy_existing(range_id=%s) failed: %s", range_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Ludus error: {exc}",
@@ -315,28 +286,26 @@ def deploy_range(
     return LudusActionResponse(status="ok", detail="Deployment started")
 
 
-@router.delete("/ranges/{range_number}", response_model=LudusActionResponse)
+@router.delete("/ranges/{range_id}", response_model=LudusActionResponse)
 def destroy_range(
-    range_number: int,
+    range_id: str,
     server: str = "default",
     force: bool = False,
     user_id: str | None = None,
-    range_str_id: str | None = None,
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
     registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
 ) -> LudusActionResponse:
-    """Destroy a range by its number."""
+    """Destroy a range by its rangeID (deletes the range + VMs, DB and Proxmox)."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=user_id, range_number=range_number)
-        ludus.range_destroy(user_id=owner, force=force)
+        ludus.range_destroy(range_id=range_id, user_id=user_id, force=force)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Range {range_number} not found",
+            detail=f"Range {range_id} not found",
         ) from exc
     except LudusError as exc:
-        logger.warning("Ludus range_destroy(range_number=%d) failed: %s", range_number, exc)
+        logger.warning("Ludus range_destroy(range_id=%s) failed: %s", range_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Ludus error: {exc}",
@@ -348,9 +317,9 @@ def destroy_range(
 # -- Power management -------------------------------------------------------
 
 
-@router.post("/ranges/{range_number}/power-on", response_model=LudusActionResponse)
+@router.post("/ranges/{range_id}/power-on", response_model=LudusActionResponse)
 def power_on_range(
-    range_number: int,
+    range_id: str,
     body: PowerActionRequest,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
@@ -359,15 +328,14 @@ def power_on_range(
     """Power on VMs in a range."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=body.user_id, range_number=range_number)
-        ludus.range_power_on(owner, machines=body.machines)
+        ludus.range_power_on(range_id=range_id, user_id=body.user_id, machines=body.machines)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Range or user not found for range {range_number}",
+            detail=f"Range {range_id} not found",
         ) from exc
     except LudusError as exc:
-        logger.warning("Ludus range_power_on(range=%d) failed: %s", range_number, exc)
+        logger.warning("Ludus range_power_on(range_id=%s) failed: %s", range_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Ludus error: {exc}",
@@ -376,9 +344,9 @@ def power_on_range(
     return LudusActionResponse(status="ok", detail="Power on initiated")
 
 
-@router.post("/ranges/{range_number}/power-off", response_model=LudusActionResponse)
+@router.post("/ranges/{range_id}/power-off", response_model=LudusActionResponse)
 def power_off_range(
-    range_number: int,
+    range_id: str,
     body: PowerActionRequest,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
@@ -387,15 +355,14 @@ def power_off_range(
     """Power off VMs in a range."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=body.user_id, range_number=range_number)
-        ludus.range_power_off(owner, machines=body.machines)
+        ludus.range_power_off(range_id=range_id, user_id=body.user_id, machines=body.machines)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Range or user not found for range {range_number}",
+            detail=f"Range {range_id} not found",
         ) from exc
     except LudusError as exc:
-        logger.warning("Ludus range_power_off(range=%d) failed: %s", range_number, exc)
+        logger.warning("Ludus range_power_off(range_id=%s) failed: %s", range_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Ludus error: {exc}",
@@ -409,18 +376,16 @@ def power_off_range(
 
 @router.get("/snapshots", response_model=LudusSnapshotListResponse)
 def list_snapshots(
-    user_id: str | None = None,
-    range_number: int | None = None,
     range_id: str | None = None,
+    user_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
     registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
 ) -> LudusSnapshotListResponse:
-    """List snapshots, optionally filtered by user or range."""
+    """List snapshots, optionally filtered by range (or user, admin only)."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=user_id, range_number=range_number)
-        raw = ludus.snapshot_list(user_id=owner)
+        raw = ludus.snapshot_list(range_id=range_id, user_id=user_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -471,6 +436,7 @@ def create_snapshot(
     try:
         ludus.snapshot_create(
             body.name,
+            range_id=body.range_id,
             user_id=body.user_id,
             description=body.description,
             include_ram=body.include_ram,
@@ -501,7 +467,9 @@ def revert_snapshot(
     """Revert to a named snapshot."""
     ludus = _resolve_client(registry, server)
     try:
-        ludus.snapshot_revert(body.name, user_id=body.user_id, vmids=body.vmids)
+        ludus.snapshot_revert(
+            body.name, range_id=body.range_id, user_id=body.user_id, vmids=body.vmids
+        )
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -520,8 +488,8 @@ def revert_snapshot(
 @router.delete("/snapshots/{name}", response_model=LudusActionResponse)
 def delete_snapshot(
     name: str,
-    user_id: str,
     range_id: str | None = None,
+    user_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
     registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
@@ -529,7 +497,7 @@ def delete_snapshot(
     """Delete a snapshot by name."""
     ludus = _resolve_client(registry, server)
     try:
-        ludus.snapshot_delete(name, user_id=user_id)
+        ludus.snapshot_delete(name, range_id=range_id, user_id=user_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -682,7 +650,7 @@ def get_template_build_logs(
 
 @router.get("/range/vms", response_model=LudusRangeDetailResponse)
 def get_range_vms(
-    range_id: int | None = None,
+    range_id: str | None = None,
     user_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
@@ -691,8 +659,7 @@ def get_range_vms(
     """Get VMs for a range with power/testing state."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=user_id, range_number=range_id)
-        raw = ludus.range_get_vms(user_id=owner)
+        raw = ludus.range_get_vms(range_id=range_id, user_id=user_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -705,7 +672,7 @@ def get_range_vms(
             detail=f"Ludus error: {exc}",
         ) from exc
 
-    # v1 returns a single range object; wrap it for the list response.
+    # GET /range returns a single range object; wrap it for the list response.
     ranges = [LudusRangeDetail.model_validate(raw)]
     return LudusRangeDetailResponse(ranges=ranges)
 
@@ -746,8 +713,7 @@ def abort_range(
     """Abort a running range deployment."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=body.user_id)
-        ludus.range_abort(user_id=owner)
+        ludus.range_abort(range_id=body.range_id, user_id=body.user_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -765,13 +731,13 @@ def abort_range(
 
 @router.delete("/range/{range_id}/vms", response_model=LudusActionResponse)
 def delete_range_vms(
-    range_id: int,
+    range_id: str,
     user_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
     registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
 ) -> LudusActionResponse:
-    """Delete all VMs in a range."""
+    """Delete all VMs in a range (keeps the range object)."""
     ludus = _resolve_client(registry, server)
     try:
         ludus.range_delete_vms(range_id, user_id=user_id)
@@ -781,7 +747,7 @@ def delete_range_vms(
             detail=f"Range {range_id} not found",
         ) from exc
     except LudusError as exc:
-        logger.warning("Ludus range_delete_vms(%d) failed: %s", range_id, exc)
+        logger.warning("Ludus range_delete_vms(%s) failed: %s", range_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Ludus error: {exc}",
@@ -832,11 +798,10 @@ def get_range_config_example(
 
 @router.get("/range/logs", response_model=LudusRangeLogsResponse)
 def get_range_logs(
-    range_id: int | None = None,
+    range_id: str | None = None,
     user_id: str | None = None,
-    range_str_id: str | None = None,
     tail: int | None = None,
-    cursor: str | None = None,
+    cursor: int | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
     registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
@@ -844,8 +809,7 @@ def get_range_logs(
     """Get deployment logs for a range."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=user_id, range_number=range_id)
-        data = ludus.range_logs(user_id=owner, tail=tail)
+        data = ludus.range_logs(range_id=range_id, user_id=user_id, tail=tail, cursor=cursor)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -863,7 +827,7 @@ def get_range_logs(
 
 @router.get("/range/logs/history", response_model=LudusLogHistoryResponse)
 def get_range_logs_history(
-    range_id: int | None = None,
+    range_id: str | None = None,
     user_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
@@ -891,7 +855,8 @@ def get_range_logs_history(
 
 @router.get("/range/logs/history/{log_id}", response_model=LudusLogEntryDetailResponse)
 def get_range_log_entry(
-    log_id: int,
+    log_id: str,
+    range_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
     registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
@@ -899,14 +864,14 @@ def get_range_log_entry(
     """Get a specific deployment log entry."""
     ludus = _resolve_client(registry, server)
     try:
-        data = ludus.range_log_entry(log_id)
+        data = ludus.range_log_entry(log_id, range_id=range_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Log entry {log_id} not found",
         ) from exc
     except LudusError as exc:
-        logger.warning("Ludus range_log_entry(%d) failed: %s", log_id, exc)
+        logger.warning("Ludus range_log_entry(%s) failed: %s", log_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Ludus error: {exc}",
@@ -917,7 +882,7 @@ def get_range_log_entry(
 
 @router.get("/range/etchosts", response_model=LudusTextResponse)
 def get_range_etchosts(
-    range_id: int | None = None,
+    range_id: str | None = None,
     user_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
@@ -926,8 +891,7 @@ def get_range_etchosts(
     """Get /etc/hosts content for a range."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=user_id, range_number=range_id)
-        content = ludus.range_etchosts(user_id=owner)
+        content = ludus.range_etchosts(range_id=range_id, user_id=user_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -965,7 +929,7 @@ def get_range_sshconfig(
 
 @router.get("/range/rdpconfigs")
 def get_range_rdpconfigs(
-    range_id: int | None = None,
+    range_id: str | None = None,
     user_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
@@ -974,8 +938,7 @@ def get_range_rdpconfigs(
     """Get RDP configs as a zip file."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=user_id, range_number=range_id)
-        content = ludus.range_rdpconfigs(user_id=owner)
+        content = ludus.range_rdpconfigs(range_id=range_id, user_id=user_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -997,7 +960,7 @@ def get_range_rdpconfigs(
 
 @router.get("/range/ansibleinventory", response_model=LudusTextResponse)
 def get_range_ansibleinventory(
-    range_id: int | None = None,
+    range_id: str | None = None,
     user_id: str | None = None,
     server: str = "default",
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
@@ -1006,8 +969,7 @@ def get_range_ansibleinventory(
     """Get Ansible inventory YAML for a range."""
     ludus = _resolve_client(registry, server)
     try:
-        owner = _resolve_userid(ludus, user_id=user_id, range_number=range_id)
-        content = ludus.range_ansibleinventory(user_id=owner)
+        content = ludus.range_ansibleinventory(range_id=range_id, user_id=user_id)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1033,7 +995,19 @@ def create_range(
     """Create a new range."""
     ludus = _resolve_client(registry, server)
     try:
-        ludus.range_create(body.name, body.range_id)
+        ludus.range_create(
+            body.name,
+            body.range_id,
+            description=body.description,
+            purpose=body.purpose,
+            user_ids=body.user_ids,
+            range_number=body.range_number,
+        )
+    except LudusRangeExists as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Range '{body.range_id}' already exists",
+        ) from exc
     except LudusError as exc:
         logger.warning("Ludus range_create failed: %s", exc)
         raise HTTPException(

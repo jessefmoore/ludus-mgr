@@ -148,7 +148,7 @@ def change_role_scope(
     """Change the scope of ansible roles."""
     ludus = _resolve_client(registry, server)
     try:
-        ludus.ansible_role_scope(body.roles, global_=body.global_, copy=body.copy_roles)
+        ludus.ansible_role_scope(body.roles, global_=body.global_, copy_roles=body.copy_roles)
     except LudusNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

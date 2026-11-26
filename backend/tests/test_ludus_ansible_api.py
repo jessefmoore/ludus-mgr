@@ -325,7 +325,7 @@ def test_change_role_scope_success(client: TestClient, mock_ludus: MagicMock) ->
     assert body["status"] == "ok"
     assert body["detail"] == "Role scope updated"
     mock_ludus.ansible_role_scope.assert_called_once_with(
-        ["role1"], global_=False, copy=False
+        ["role1"], global_=False, copy_roles=False
     )
 
 

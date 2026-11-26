@@ -1,4 +1,4 @@
-# ludus-v1-mgr
+# ludus-mgr
 
 Training lab deployment management platform powered by [Ludus](https://ludus.cloud).
 
@@ -62,7 +62,7 @@ docker compose up -d
 
 ## Connecting to Ludus
 
-Ludus v1 exposes **two** API ports, and this platform needs both:
+Some Ludus deployments still expose **two** API ports, and this platform supports both:
 
 - **`:8080`** — user API (all interfaces). Ranges, snapshots, WireGuard configs, testing.
 - **`:8081`** — admin API (**`127.0.0.1` only**). Creating and deleting Ludus users. Bulk
@@ -107,7 +107,7 @@ LUDUS_DEFAULT_VERIFY_TLS=false                        # Ludus uses a self-signed
 See `.env.example` for the full list of Ludus variables.
 
 ### Credits
-This was foked from https://github.com/whiteov3rflow/ludus-helm and modified to work with Ludus version 1
+This was forked from https://github.com/whiteov3rflow/ludus-helm and modified to work with Ludus version 2
 
 ## License
 

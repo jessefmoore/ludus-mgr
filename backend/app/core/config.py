@@ -17,14 +17,14 @@ class LudusServerConfig:
     url: str
     api_key: str
     verify_tls: bool = False
-    # Optional separate admin-API URL. On Ludus v1, user create/delete are
-    # served only by the admin API (127.0.0.1:8081); everything else uses
-    # ``url``. Leave None on newer Ludus where one URL serves everything.
+    # Optional separate admin-API URL, for Ludus deployments that still split
+    # user create/delete onto a dedicated admin listener (e.g. 127.0.0.1:8081);
+    # everything else uses ``url``. Leave None when one URL serves everything.
     admin_url: str | None = None
 
 
 class Settings(BaseSettings):
-    """Typed, env-driven configuration for the ludus-v1-mgr backend."""
+    """Typed, env-driven configuration for the ludus-mgr backend."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     ludus_default_url: str
     ludus_default_api_key: str
     ludus_default_verify_tls: bool = False
-    # Optional admin-API URL for Ludus v1 user management (see LudusServerConfig).
+    # Optional admin-API URL for user management (see LudusServerConfig).
     ludus_default_admin_url: str | None = None
 
     # --- Ludus/Proxmox login authentication ---
@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     max_range_ram_gb: int | None = None
 
     # Physical capacity of the DEFAULT Ludus/Proxmox host, used by the host
-    # capacity dashboard to show how much CPU/RAM is left to assign. Ludus v1
+    # capacity dashboard to show how much CPU/RAM is left to assign. Ludus
     # exposes no host-resource endpoint, so these are configured manually.
     # None = unconfigured (dashboard prompts to set them). DB-managed servers
     # store their own capacity on the ludus_servers row.

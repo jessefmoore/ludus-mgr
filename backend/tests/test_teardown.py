@@ -36,10 +36,10 @@ class FakeLudus:
         self.user_rm_calls: list[str] = []
         self.errors: dict[str, Exception] = {}  # userid -> exception to raise
 
-    def range_destroy(self, *, user_id: str | None = None, force: bool = False) -> None:
-        if user_id in self.errors:
-            raise self.errors[user_id]
-        self.range_destroy_calls.append(user_id or "")
+    def range_destroy(self, *, range_id: str | None = None, force: bool = False) -> None:
+        if range_id in self.errors:
+            raise self.errors[range_id]
+        self.range_destroy_calls.append(range_id or "")
 
     def user_rm(self, userid: str) -> None:
         if userid in self.errors:
