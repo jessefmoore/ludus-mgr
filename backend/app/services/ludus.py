@@ -37,7 +37,11 @@ Routes used here (verified against the live v2 OpenAPI spec):
     GET    /ranges/accessible                       -> ranges_accessible
     PUT    /range/config?rangeID=<id>               -> range_deploy step 1 (multipart file, force)
     POST   /range/deploy?rangeID=<id>               -> range_deploy step 2 / range_deploy_existing
-    DELETE /range?rangeID=<id>[&force=true]         -> range_destroy (deletes the range + VMs, DB and Proxmox)
+    DELETE /range?rangeID=<id>[&force=true]         -> range_destroy (destroys VMs + Proxmox pool;
+                                                        the range row itself is NOT removed from Ludus's
+                                                        DB - it persists forever as rangeState=DESTROYED,
+                                                        numberOfVMs=0. The UI must filter these out itself;
+                                                        see isLiveRange() in LudusManagement.tsx)
     DELETE /range/{rangeID}/vms?userID=             -> range_delete_vms (VM-only, keeps the range object)
     GET    /range/all                               -> range_list
     GET    /range?rangeID=<id>                      -> range_get_vms  (single obj with VMs[])
@@ -113,8 +117,10 @@ from app.services.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-# Ludus v2 serves its API at the root - there is NO version prefix.
-API_BASE = ""
+# Ludus v2 mounts its REST API under /api/v2 (confirmed live against a
+# 192.168.0.191 deployment on 2026-11-26 - every route 404s at the bare
+# root path, e.g. GET /user/all 404s but GET /api/v2/user/all succeeds).
+API_BASE = "/api/v2"
 
 
 def _extract_error_detail(response: httpx.Response) -> str:
@@ -700,15 +706,22 @@ class LudusClient:
     def range_destroy(
         self, *, range_id: str | None = None, user_id: str | None = None, force: bool = False
     ) -> None:
-        """Delete a range from the database and the Proxmox host.
+        """Destroy a range's VMs and Proxmox pool.
 
         Route:  DELETE /range?rangeID=[&force=]
 
-        Unlike Ludus v1's ``range rm``, this deletes the range *object*
-        itself (not just its VMs) - the range must be re-created via
-        ``range_create`` before it can be deployed again. ``force=True``
-        is required if the range still has VMs; use ``range_delete_vms``
-        instead if you only want to wipe VMs and keep the range object.
+        Unlike Ludus v1's ``range rm``, this tears down more than VMs - the
+        range must be re-created via ``range_create`` before it can be
+        deployed again. ``force=True`` is required if the range still has
+        VMs; use ``range_delete_vms`` instead if you only want to wipe VMs
+        and keep the range object.
+
+        Confirmed live against a Ludus v2 server: despite the name, this does
+        NOT remove the range's row from ``GET /range/all`` - it persists
+        forever with ``rangeState: "DESTROYED"``, ``numberOfVMs: 0``, tied to
+        the owning Ludus user. Callers that list ranges for display must
+        filter these out themselves (see ``isLiveRange()`` in
+        ``LudusManagement.tsx``).
         """
         self._request(
             "DELETE",

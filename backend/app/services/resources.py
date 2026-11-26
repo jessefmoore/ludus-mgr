@@ -115,6 +115,43 @@ def compute_range_resources(range_config_yaml: str) -> RangeResources:
     )
 
 
+def compute_live_range_resources(ranges: list[dict]) -> RangeResources:
+    """Sum real CPU/RAM/VM/range totals from Ludus's own live range list.
+
+    Unlike :func:`compute_range_resources` (which reads a range config's
+    *declared* intent for one range), this reads what Ludus reports is
+    actually deployed right now - per-VM ``cpu``/``ram`` from ``GET
+    /range/all`` - summed across every range on the server, including ones
+    this app didn't create. A ``DESTROYED`` range contributes nothing (its
+    VMs are gone; Ludus just never removes the row - see
+    ``isLiveRange()`` in the frontend for the display-side version of this
+    same exclusion).
+    """
+    total = RangeResources()
+    for r in ranges:
+        if not isinstance(r, dict) or r.get("rangeState") == "DESTROYED":
+            continue
+        vms = r.get("VMs")
+        if not isinstance(vms, list) or not vms:
+            continue
+        range_total = RangeResources()
+        for vm in vms:
+            if not isinstance(vm, dict):
+                continue
+            range_total = range_total + RangeResources(
+                cpus=_coerce_int(vm.get("cpu")),
+                ram_gb=_coerce_int(vm.get("ram")),
+                vm_count=1,
+            )
+        total = total + RangeResources(
+            cpus=range_total.cpus,
+            ram_gb=range_total.ram_gb,
+            vm_count=range_total.vm_count,
+            range_count=1,
+        )
+    return total
+
+
 def compute_session_demand(
     per_range: RangeResources,
     mode: SessionMode,
@@ -135,6 +172,7 @@ def compute_session_demand(
 
 __all__ = [
     "RangeResources",
+    "compute_live_range_resources",
     "compute_range_resources",
     "compute_session_demand",
 ]

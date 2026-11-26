@@ -131,6 +131,10 @@ class SessionQuotaRead(BaseModel):
     vm_quota: int | None = None
     range_quota: int | None = None
     within_quota: bool
+    # Human-readable breach(es) of quota by demand, e.g. "CPU 2 > quota 1".
+    # Empty when within_quota is True. Mirrors the message in the 409 the
+    # backend raises if provisioning is attempted anyway.
+    breaches: list[str] = []
 
 
 __all__ = [

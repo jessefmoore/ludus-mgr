@@ -674,6 +674,27 @@ function PlatformCard({
           )}
         </div>
 
+        {/* Proxmox Login URL */}
+        <div className="space-y-2">
+          <label className="block text-[13px] uppercase tracking-wider text-text-secondary">
+            Proxmox Login URL
+          </label>
+          {loading ? (
+            <Skeleton variant="rect" height="44px" />
+          ) : (
+            <div className="h-11 px-3 rounded-md bg-bg-elevated border border-border flex items-center gap-2">
+              <Shield className="h-4 w-4 text-text-muted shrink-0" />
+              <span className="text-[15px] font-mono text-text-primary truncate">
+                {config?.proxmox_login_url ?? "Ludus/Proxmox login disabled"}
+              </span>
+            </div>
+          )}
+          <p className="text-[13px] text-text-muted">
+            Lab manager logins with a Ludus userID/Proxmox username are validated
+            against this host.
+          </p>
+        </div>
+
         <p className="text-[13px] text-text-muted">
           These values are configured via environment variables.
         </p>

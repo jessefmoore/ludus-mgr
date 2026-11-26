@@ -106,6 +106,9 @@ export interface SessionQuotaRead {
   vm_quota: number | null;
   range_quota: number | null;
   within_quota: boolean;
+  // Human-readable breach(es) of quota by demand, e.g. "CPU 2 > quota 1".
+  // Empty when within_quota is true.
+  breaches: string[];
 }
 
 export interface SessionDetailRead extends SessionRead {
@@ -206,13 +209,21 @@ export interface LudusRangeListResponse {
 export interface LudusCapacity {
   server: string;
   configured: boolean;
+  source: "proxmox" | "ranges" | string;
+  node: string | null;
   cpu_capacity: number | null;
   ram_capacity_gb: number | null;
   cpu_allocated: number;
   ram_allocated_gb: number;
   cpu_available: number | null;
   ram_available_gb: number | null;
-  session_count: number;
+  range_count: number;
+  storage_capacity_gb: number | null;
+  storage_used_gb: number | null;
+  storage_available_gb: number | null;
+  vm_count: number;
+  committed_cpus: number | null;
+  committed_ram_gb: number | null;
 }
 
 export interface LudusRangeConfigResponse {
@@ -296,6 +307,7 @@ export interface PlatformSettings {
   admin_email: string;
   invite_token_ttl_hours: number;
   public_base_url: string;
+  proxmox_login_url: string | null;
 }
 
 // Ludus Servers
@@ -396,6 +408,21 @@ export interface LudusRangeUser {
 
 export interface LudusRangeUsersResponse {
   users: LudusRangeUser[];
+}
+
+export interface LudusOrphanedRangesResponse {
+  range_ids: string[];
+}
+
+export interface LudusRangeDiagnosticsResponse {
+  range_id: string;
+  range_state: string | null;
+  owners: LudusRangeUser[];
+  orphaned: boolean;
+  detail_error: string | null;
+  log_history: LudusLogHistoryEntry[];
+  latest_log_status: string | null;
+  latest_log_content: string | null;
 }
 
 export interface LudusAccessibleRange {

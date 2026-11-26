@@ -337,6 +337,7 @@ def test_quota_endpoint_reports_demand(db_session: OrmSession, settings: Setting
     assert body["demand_ram_gb"] == 24
     assert body["cpu_quota"] == 8
     assert body["within_quota"] is False  # 12 > 8
+    assert body["breaches"] == ["CPU 12 > quota 8"]
 
 
 # ---------------------------------------------------------------------------

@@ -66,6 +66,19 @@ class Settings(BaseSettings):
     proxmox_realm: str = "pam"
     proxmox_verify_tls: bool = False
 
+    # --- Proxmox host stats (dashboard capacity card) ---
+    # A Proxmox API token (format "user@realm!tokenid=secret") scoped to the
+    # built-in PVEAuditor role - read-only, no write/exec access. Used to pull
+    # real host CPU/RAM/storage usage for the "default" server's capacity
+    # card. None = card shows "not configured" (see README for setup steps).
+    # Not yet wired for DB-managed servers (ludus_servers table) - only the
+    # env-configured "default" server supports this today.
+    proxmox_api_token: str | None = None
+    # Proxmox node name to query. Auto-detected if unset and the cluster has
+    # exactly one node (the common single-host lab case); required if it has
+    # more than one.
+    proxmox_node: str | None = None
+
     @property
     def resolved_proxmox_url(self) -> str | None:
         """Proxmox base URL for auth, explicit or derived from the Ludus host."""

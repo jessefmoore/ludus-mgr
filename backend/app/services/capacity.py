@@ -1,19 +1,28 @@
 """Host resource-capacity view for the dashboard.
 
-"How much CPU/RAM can I still assign" is derived from two sources:
+Two ways to answer "how much CPU/RAM/storage is left on this host", in
+preference order:
 
-* **Capacity** (physical total): configured manually - env settings for the
-  ``default`` server, ``cpu_capacity``/``ram_capacity_gb`` columns for
-  DB-managed servers.
-* **Allocated** (in use): summed from *this app's own sessions* - the CPU/RAM
-  each live session commits, using the same demand math as the quota feature
-  (:mod:`app.services.resources`). Only sessions that are actually consuming
-  resources count: ``active`` and ``provisioning`` (``draft`` has not
-  provisioned yet, ``ended`` has been torn down). This deliberately ignores
-  ranges created outside the app so the dashboard reflects what you deployed.
+1. **Proxmox-sourced** (:func:`build_proxmox_capacity_view`): real, measured
+   CPU load / RAM / storage pulled straight from the Proxmox host via
+   :mod:`app.services.proxmox`. Total capacity comes from Proxmox itself, not
+   manual configuration, so it can't drift out of sync with the hardware.
+   Currently only wired for the ``default`` server (set ``PROXMOX_API_TOKEN``
+   to enable it; see README).
 
-``available = capacity - allocated`` (may go negative when overcommitted; the
-router/UI surface that rather than clamping the truth).
+2. **Ludus-range-sum fallback** (:func:`build_ranges_capacity_view`): manually
+   configured capacity (env for ``default``, DB row for other servers) vs.
+   real per-VM ``cpu``/``ram`` summed from Ludus's own live range list (``GET
+   /range/all``) across every non-``DESTROYED`` range on the server -
+   including ranges this app didn't create. Used for any server without a
+   Proxmox token configured. An earlier version of this fallback summed only
+   this app's own active/provisioning sessions using their lab templates'
+   *declared* YAML cost, which silently understated real host load for any
+   server with ranges from other tools/users - the common case once a server
+   has been in use for a while.
+
+``available = capacity - allocated`` in both cases (may go negative when
+overcommitted; the router/UI surface that rather than clamping the truth).
 """
 
 from __future__ import annotations
@@ -22,67 +31,36 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-from sqlalchemy.orm import joinedload
-
-from app.models import LabTemplate, SessionStatus, StudentStatus
-from app.models import Session as SessionRow
-from app.services.resources import (
-    RangeResources,
-    compute_range_resources,
-    compute_session_demand,
-)
+from app.services.resources import RangeResources, compute_live_range_resources
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session as DBSession
 
     from app.core.config import Settings
+    from app.services.proxmox import ProxmoxHostStats
 
 logger = logging.getLogger(__name__)
 
-# Sessions in these states are actively holding resources on the host.
-_CONSUMING_STATUSES = (SessionStatus.active, SessionStatus.provisioning)
+_BYTES_PER_GIB = 1024**3
 
 
 @dataclass(frozen=True)
 class Allocation:
-    """Summed resources across a server's live sessions."""
+    """Summed resources across every live range Ludus reports for a server."""
 
     resources: RangeResources
-    session_count: int
+    range_count: int
 
 
-def compute_sessions_allocation(db: DBSession, server: str) -> Allocation:
-    """Sum the CPU/RAM committed by this app's live sessions on *server*.
+def compute_live_allocation(ranges: list[dict]) -> Allocation:
+    """Sum real CPU/RAM/VM/range totals across every live range on the host.
 
-    A session's demand is its lab template's per-range cost scaled by mode
-    (shared = one range; dedicated = one per student) - identical to what the
-    provision-time quota check enforces. Only sessions whose lab template
-    targets *server* and whose status is consuming are counted.
+    *ranges* is the raw list from ``LudusClient.range_list()`` (``GET
+    /range/all``) for the target server - the caller fetches it so this
+    module stays DB/HTTP-free and easy to test with plain dicts.
     """
-    stmt = (
-        select(SessionRow)
-        .options(joinedload(SessionRow.students))
-        .join(LabTemplate, LabTemplate.id == SessionRow.lab_template_id)
-        .where(
-            SessionRow.status.in_(_CONSUMING_STATUSES),
-            LabTemplate.ludus_server == server,
-        )
-    )
-    sessions = db.execute(stmt).unique().scalars().all()
-
-    total = RangeResources()
-    for session in sessions:
-        lab = db.get(LabTemplate, session.lab_template_id)
-        if lab is None:
-            continue
-        per_range = compute_range_resources(lab.range_config_yaml)
-        # Only ranges actually deployed (ready students) consume resources; a
-        # student whose range was removed / never provisioned does not count.
-        deployed = sum(1 for s in session.students if s.status == StudentStatus.ready)
-        demand = compute_session_demand(per_range, session.mode, deployed)
-        total = total + demand
-    return Allocation(resources=total, session_count=len(sessions))
+    resources = compute_live_range_resources(ranges)
+    return Allocation(resources=resources, range_count=resources.range_count)
 
 
 def resolve_capacity(
@@ -112,42 +90,112 @@ class CapacityView:
 
     server: str
     configured: bool
+    # "proxmox" (real measured host stats) or "ranges" (manual capacity vs.
+    # live Ludus range sum, the fallback for servers without a Proxmox token).
+    source: str
     cpu_capacity: int | None
-    ram_capacity_gb: int | None
+    ram_capacity_gb: float | None
     cpu_allocated: int
-    ram_allocated_gb: int
+    ram_allocated_gb: float
     cpu_available: int | None
-    ram_available_gb: int | None
-    session_count: int
+    ram_available_gb: float | None
+    range_count: int
+    # Only populated when source == "proxmox" - Ludus has no concept of host
+    # disk capacity, so the "ranges" fallback can never report this.
+    node: str | None = None
+    storage_capacity_gb: float | None = None
+    storage_used_gb: float | None = None
+    storage_available_gb: float | None = None
+    # VM-declared CPU/RAM committed across every live range (same figure the
+    # "ranges" source uses as its primary number) - a planning companion to
+    # the real-time Proxmox figures above: live load can sit near zero while
+    # VMs that are merely powered on but idle still reserve this much, so
+    # this is what "all VMs busy at once" would actually cost. Only
+    # populated when source == "proxmox"; for the "ranges" source,
+    # cpu_allocated/ram_allocated_gb already are this number.
+    vm_count: int = 0
+    committed_cpus: int | None = None
+    committed_ram_gb: float | None = None
 
 
-def build_capacity_view(
+def build_ranges_capacity_view(
     db: DBSession,
     settings: Settings,
     server: str,
+    ranges: list[dict],
 ) -> CapacityView:
-    """Assemble the capacity/allocation/available view for one server."""
+    """Fallback capacity view: manual capacity vs. live Ludus range sum.
+
+    *ranges* is the live range list fetched by the caller (see
+    :func:`compute_live_allocation`). Used for any server without a Proxmox
+    token configured (see :func:`build_proxmox_capacity_view`).
+    """
     cpu_cap, ram_cap = resolve_capacity(db, settings, server)
-    alloc = compute_sessions_allocation(db, server)
+    alloc = compute_live_allocation(ranges)
     cpu_used = alloc.resources.cpus
     ram_used = alloc.resources.ram_gb
     return CapacityView(
         server=server,
         configured=cpu_cap is not None or ram_cap is not None,
+        source="ranges",
         cpu_capacity=cpu_cap,
         ram_capacity_gb=ram_cap,
         cpu_allocated=cpu_used,
         ram_allocated_gb=ram_used,
         cpu_available=(cpu_cap - cpu_used) if cpu_cap is not None else None,
         ram_available_gb=(ram_cap - ram_used) if ram_cap is not None else None,
-        session_count=alloc.session_count,
+        range_count=alloc.range_count,
+    )
+
+
+def build_proxmox_capacity_view(
+    server: str, stats: ProxmoxHostStats, ranges: list[dict]
+) -> CapacityView:
+    """Capacity view from real, measured Proxmox host stats.
+
+    CPU is reported by Proxmox as a live load fraction, not a count of
+    reserved cores - ``cpu_allocated`` here is that fraction converted to a
+    core-equivalent (``round(fraction * cpu_count)``) purely so it fits the
+    same allocated-vs-capacity bar the RAM/storage figures use; it's a
+    snapshot of current load, not a commitment total.
+
+    *ranges* (Ludus's live range list) additionally drives
+    ``committed_cpus``/``committed_ram_gb``/``vm_count`` - the VM-declared
+    total if every existing VM were busy at once, for capacity planning
+    independent of whatever the live load happens to be right now.
+    """
+    mem_total_gb = stats.mem_total_bytes / _BYTES_PER_GIB
+    mem_used_gb = stats.mem_used_bytes / _BYTES_PER_GIB
+    storage_total_gb = stats.storage_total_bytes / _BYTES_PER_GIB
+    storage_used_gb = stats.storage_used_bytes / _BYTES_PER_GIB
+    cpu_used = round(stats.cpu_fraction * stats.cpu_count)
+    alloc = compute_live_allocation(ranges)
+    return CapacityView(
+        server=server,
+        configured=True,
+        source="proxmox",
+        node=stats.node,
+        cpu_capacity=stats.cpu_count,
+        ram_capacity_gb=round(mem_total_gb, 2),
+        cpu_allocated=cpu_used,
+        ram_allocated_gb=round(mem_used_gb, 2),
+        cpu_available=stats.cpu_count - cpu_used,
+        ram_available_gb=round(mem_total_gb - mem_used_gb, 2),
+        range_count=alloc.range_count,
+        storage_capacity_gb=round(storage_total_gb, 2),
+        storage_used_gb=round(storage_used_gb, 2),
+        storage_available_gb=round(storage_total_gb - storage_used_gb, 2),
+        vm_count=alloc.resources.vm_count,
+        committed_cpus=alloc.resources.cpus,
+        committed_ram_gb=alloc.resources.ram_gb,
     )
 
 
 __all__ = [
     "Allocation",
     "CapacityView",
-    "build_capacity_view",
-    "compute_sessions_allocation",
+    "build_proxmox_capacity_view",
+    "build_ranges_capacity_view",
+    "compute_live_allocation",
     "resolve_capacity",
 ]

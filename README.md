@@ -62,6 +62,12 @@ docker compose up -d
 # UI at http://localhost (frontend nginx), API at http://localhost/api
 ```
 
+`.env` lives in this repo's root **on the machine running `docker compose`**
+(not committed - it's git-ignored, since it holds secrets). Every lab manager
+standing up their own instance creates their own from `.env.example` and fills
+in their own `LUDUS_DEFAULT_API_KEY` - see
+[Connecting to Ludus](#connecting-to-ludus) for where to get that key.
+
 ## Rebuilding / updating
 
 After pulling new code (or making local changes), rebuild and restart with:
@@ -138,6 +144,52 @@ LUDUS_DEFAULT_VERIFY_TLS=false                        # Ludus uses a self-signed
 ```
 
 See `.env.example` for the full list of Ludus variables.
+
+### Getting an admin API key
+
+`LUDUS_DEFAULT_API_KEY` must belong to a Ludus user with `isAdmin: true` -
+this platform creates/deletes Ludus users and (optionally) authenticates lab
+manager logins against Ludus/Proxmox credentials, both of which are
+admin-only Ludus operations.
+
+1. Log into the Ludus web UI (`https://<ludus-host>:8080/ui/`) as an admin
+   user.
+2. Go to your user settings and reset/copy your API key (this is the same
+   thing the `GET /user/apikey` route does).
+3. Paste it into `.env` as `LUDUS_DEFAULT_API_KEY` on the machine running
+   `docker compose`, then restart: `docker compose up -d --build`.
+
+**Resetting an API key invalidates the previous one immediately** - if
+another tool or teammate is still using the old key, it will start getting
+`401 Invalid API key` until `.env` is updated with the new one.
+
+### Real host stats for the dashboard (Proxmox API token)
+
+The dashboard's "Host Capacity" card prefers real, measured CPU/RAM/storage
+usage pulled directly from Proxmox over the manually-configured-capacity
+fallback (which can't account for storage at all, and silently drifts out
+of sync with the actual hardware). This needs a **read-only** Proxmox API
+token - never a full admin account:
+
+1. In the Proxmox web UI: **Datacenter → Permissions → Users → Add**. Create
+   a dedicated user, e.g. `ludus-mgr-readonly@pve`, with no password needed
+   (the token is the credential).
+2. **Datacenter → Permissions → Add → User Permission**: Path `/`, User
+   `ludus-mgr-readonly@pve`, Role `PVEAuditor` (built-in, read-only - no
+   write/exec access anywhere).
+3. **Datacenter → Permissions → API Tokens → Add**: User
+   `ludus-mgr-readonly@pve`, Token ID e.g. `ludus-mgr`, and **uncheck
+   "Privilege Separation"** so the token inherits the user's `PVEAuditor`
+   role directly instead of needing its own separate permission grant.
+4. Copy the full token value shown (**only shown once**) - it looks like
+   `ludus-mgr-readonly@pve!ludus-mgr=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
+5. Paste it into `.env` as `PROXMOX_API_TOKEN`, then restart:
+   `docker compose up -d --build`.
+
+Only needed if the Proxmox cluster has more than one node: set `PROXMOX_NODE`
+to the node to report on (auto-detected otherwise). Currently only wired for
+the `default` Ludus server - other configured servers still use the
+manual-capacity fallback.
 
 ### Credits
 This was forked from https://github.com/whiteov3rflow/ludus-helm and modified to work with Ludus version 2

@@ -168,6 +168,16 @@ def get_session_quota(
         and (row.vm_quota is None or demand.vm_count <= row.vm_quota)
         and (row.range_quota is None or demand.range_count <= row.range_quota)
     )
+    breaches = provision_service.quota_breaches(
+        demand_cpus=demand.cpus,
+        demand_ram_gb=demand.ram_gb,
+        demand_vms=demand.vm_count,
+        demand_ranges=demand.range_count,
+        cpu_quota=row.cpu_quota,
+        ram_quota_gb=row.ram_quota_gb,
+        vm_quota=row.vm_quota,
+        range_quota=row.range_quota,
+    )
     return SessionQuotaRead(
         mode=row.mode,
         student_count=student_count,
@@ -188,6 +198,7 @@ def get_session_quota(
         vm_quota=row.vm_quota,
         range_quota=row.range_quota,
         within_quota=within_quota,
+        breaches=breaches,
     )
 
 

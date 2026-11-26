@@ -12,6 +12,60 @@ start a fresh `[Unreleased]` block.
 
 ## [Unreleased]
 
+### Fixed
+- **Ludus v2 API prefix** - `LudusClient` was sending every request to the
+  bare path (e.g. `/user/all`) instead of `/api/v2/user/all`, so it never
+  worked against a real Ludus v2 server (confirmed live: every route 404'd
+  at the root, succeeded under `/api/v2`). This silently broke all Ludus
+  calls, including the Ludus/Proxmox login path (`authenticate_ludus`
+  couldn't list users to resolve a login identifier).
+- **Ludus Management: destroyed ranges never left the Ranges list** - Ludus
+  v2 doesn't delete a range's row from `GET /range/all` on destroy, it just
+  sets `numberOfVMs: 0` / `rangeState: "DESTROYED"` and keeps it forever
+  (confirmed live: 22 of 34 ranges on this server are such tombstones). The
+  Ranges tab's "destroy in progress" completion check also never matched
+  this state, so the "Range X destroyed" success toast never fired and the
+  row never cleared. Added a shared `isLiveRange()` filter (excludes
+  `DESTROYED`) applied everywhere ranges are listed or offered as a pick
+  target (Ranges tab, snapshot/power/logs range pickers, assign-user-to-range
+  modal) - destroyed ranges now drop out of the UI as soon as the destroy
+  completes, and the completion toast fires correctly.
+- **Ludus Management: orphaned ranges (owner deleted) also cluttered the
+  Ranges list** - a range whose owning Ludus user was deleted keeps showing
+  up forever (e.g. `rangeState: "ERROR"`, Proxmox pool long gone), and its
+  `rangeID` doesn't necessarily match any single owner's `userID`, so it
+  can't be detected from the range list alone. `isLiveRange()` now also
+  excludes ranges where `GET /ranges/{rangeID}/users` reports no owner
+  (`GET /api/ludus/ranges/orphaned`, computed server-side so the frontend
+  isn't firing 30+ per-range requests).
+
+### Added
+- **Settings page: Proxmox Login URL** - shows the Proxmox host that
+  Ludus/Proxmox-credential logins are validated against (derived from
+  `LUDUS_DEFAULT_URL`'s host on port 8006, or `PROXMOX_URL` if set), so
+  lab managers don't have to read `.env` to find it.
+- **Ranges tab: click an ERROR range for diagnostics** - clicking an
+  `ERROR` state pill opens a panel with who (if anyone) has access to the
+  range, the direct-lookup error if its Proxmox pool is gone, and its full
+  deploy log history + latest log content - the same checks previously done
+  by hand against the raw Ludus API, bundled into one
+  `GET /api/ludus/ranges/{range_id}/diagnostics` call.
+- **Host Capacity card now prefers real Proxmox stats** - the live-Ludus-
+  range-sum fix above was still an approximation (declared VM cost, no
+  storage visibility at all). `PROXMOX_API_TOKEN` (see README) switches the
+  dashboard's Host Capacity card to real, measured CPU/RAM/storage pulled
+  directly from the Proxmox host (`app/services/proxmox.py`, read-only -
+  expects a token scoped to the built-in `PVEAuditor` role). Falls back to
+  the live-range-sum approach when unset, or for any server other than
+  `default` (not yet wired for multi-server Proxmox).
+- **Host Capacity card: "if every VM ran at once" planning row** - alongside
+  the real Proxmox-measured load, the card now also shows VM-declared
+  CPU/RAM committed across every live range (the same figure the
+  live-range-sum fallback uses as its primary number) - live load can sit
+  near zero while merely-idle VMs still reserve this much, so this answers
+  "what happens when everyone starts using their VMs at once" independent
+  of current load.
+
 ## [1.0.0] - 2026-04-21
 
 First major release. Full-stack platform with instructor dashboard, Ludus

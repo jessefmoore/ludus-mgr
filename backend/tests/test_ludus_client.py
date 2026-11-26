@@ -1,6 +1,7 @@
 """Unit tests for `app.services.ludus.LudusClient` against the Ludus v2 contract.
 
-Ludus v2 serves bare routes (no version prefix), addresses ranges by
+Ludus v2 mounts its API under ``/api/v2`` (confirmed live - see the
+``API_BASE`` comment in ``app.services.ludus``), addresses ranges by
 ``?rangeID=`` (independent of their owning user), shares ranges via
 ``/ranges/assign``/``/ranges/revoke``, and adds groups/whoami/log-history/
 role-vars/role-scope/per-VM-delete endpoints that v1 lacked.
@@ -43,20 +44,20 @@ def _url(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# v2 uses bare routes (no version prefix)
+# v2 mounts its API under /api/v2
 # ---------------------------------------------------------------------------
 
 
-def test_api_base_has_no_version_prefix() -> None:
-    assert API_BASE == ""
+def test_api_base_is_v2_prefix() -> None:
+    assert API_BASE == "/api/v2"
 
 
-def test_routes_are_bare(client: LudusClient, httpx_mock: HTTPXMock) -> None:
+def test_routes_use_v2_prefix(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="GET", url=_url("/user/all"), json=[])
     client.user_list()
     sent = httpx_mock.get_request()
     assert sent is not None
-    assert sent.url.path == "/user/all"
+    assert sent.url.path == "/api/v2/user/all"
     assert sent.headers["X-API-KEY"] == API_KEY
 
 
@@ -157,11 +158,11 @@ def test_user_writes_use_admin_url(httpx_mock: HTTPXMock) -> None:
     c = LudusClient(url=BASE_URL, api_key=API_KEY, verify_tls=False, admin_url=admin)
     try:
         httpx_mock.add_response(
-            method="POST", url=f"{admin}/user", status_code=201,
+            method="POST", url=f"{admin}{API_BASE}/user", status_code=201,
             json={"userID": "bob", "isAdmin": False, "name": "Bob"},
         )
-        httpx_mock.add_response(method="DELETE", url=f"{admin}/user/bob", json={})
-        httpx_mock.add_response(method="GET", url=f"{BASE_URL}/user/all", json=[])
+        httpx_mock.add_response(method="DELETE", url=f"{admin}{API_BASE}/user/bob", json={})
+        httpx_mock.add_response(method="GET", url=f"{BASE_URL}{API_BASE}/user/all", json=[])
 
         c.user_add("bob", "Bob", "bob@example.com")
         c.user_rm("bob")
@@ -170,8 +171,8 @@ def test_user_writes_use_admin_url(httpx_mock: HTTPXMock) -> None:
         c.close()
 
     reqs = httpx_mock.get_requests()
-    assert str(reqs[0].url) == f"{admin}/user"          # add -> admin
-    assert str(reqs[1].url) == f"{admin}/user/bob"      # rm  -> admin
+    assert str(reqs[0].url) == f"{admin}{API_BASE}/user"      # add -> admin
+    assert str(reqs[1].url) == f"{admin}{API_BASE}/user/bob"  # rm  -> admin
     assert reqs[2].url.host == "ludus.test" and reqs[2].url.port == 8080  # list -> primary
 
 
@@ -263,7 +264,7 @@ def test_range_assign(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="POST", url=_url("/ranges/assign/STU1/LEAD"), json={})
     client.range_assign("STU1", "LEAD")
     sent = httpx_mock.get_request()
-    assert sent.url.path == "/ranges/assign/STU1/LEAD"
+    assert sent.url.path == "/api/v2/ranges/assign/STU1/LEAD"
 
 
 def test_range_revoke(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -272,7 +273,7 @@ def test_range_revoke(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     )
     client.range_revoke("STU1", "LEAD", force=True)
     sent = httpx_mock.get_request()
-    assert sent.url.path == "/ranges/revoke/STU1/LEAD"
+    assert sent.url.path == "/api/v2/ranges/revoke/STU1/LEAD"
     assert sent.url.params["force"] == "true"
 
 
@@ -303,8 +304,8 @@ def test_range_deploy_two_steps(client: LudusClient, httpx_mock: HTTPXMock) -> N
     httpx_mock.add_response(method="POST", url=_url("/range/deploy?rangeID=JM"), json={})
     client.range_deploy("JM", "ludus:\n  - vm_name: x\n")
     reqs = httpx_mock.get_requests()
-    assert reqs[0].method == "PUT" and reqs[0].url.path == "/range/config"
-    assert reqs[1].method == "POST" and reqs[1].url.path == "/range/deploy"
+    assert reqs[0].method == "PUT" and reqs[0].url.path == "/api/v2/range/config"
+    assert reqs[1].method == "POST" and reqs[1].url.path == "/api/v2/range/deploy"
     assert reqs[0].url.params["rangeID"] == "JM"
 
 
@@ -369,7 +370,7 @@ def test_range_destroy_rangeid_and_force(client: LudusClient, httpx_mock: HTTPXM
 def test_range_delete_vms(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="DELETE", url=_url("/range/JM/vms"), json={})
     client.range_delete_vms("JM")
-    assert httpx_mock.get_request().url.path == "/range/JM/vms"
+    assert httpx_mock.get_request().url.path == "/api/v2/range/JM/vms"
 
 
 def test_range_abort(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -446,14 +447,14 @@ def test_snapshot_revert_body(client: LudusClient, httpx_mock: HTTPXMock) -> Non
     httpx_mock.add_response(method="POST", url=_url("/snapshots/rollback?rangeID=JM"), json={})
     client.snapshot_revert("snap1", range_id="JM")
     sent = httpx_mock.get_request()
-    assert sent.url.path == "/snapshots/rollback"
+    assert sent.url.path == "/api/v2/snapshots/rollback"
     assert "snap1" in sent.read().decode()
 
 
 def test_snapshot_delete_body(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="POST", url=_url("/snapshots/remove?rangeID=JM"), json={})
     client.snapshot_delete("snap1", range_id="JM")
-    assert httpx_mock.get_request().url.path == "/snapshots/remove"
+    assert httpx_mock.get_request().url.path == "/api/v2/snapshots/remove"
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +513,7 @@ def test_template_build_body(client: LudusClient, httpx_mock: HTTPXMock) -> None
 def test_template_abort(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="POST", url=_url("/templates/abort"), json={})
     client.template_abort()
-    assert httpx_mock.get_request().url.path == "/templates/abort"
+    assert httpx_mock.get_request().url.path == "/api/v2/templates/abort"
 
 
 def test_template_status(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -528,7 +529,7 @@ def test_template_logs(client: LudusClient, httpx_mock: HTTPXMock) -> None:
 def test_template_delete(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="DELETE", url=_url("/template/win2019"), json={})
     client.template_delete("win2019")
-    assert httpx_mock.get_request().url.path == "/template/win2019"
+    assert httpx_mock.get_request().url.path == "/api/v2/template/win2019"
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +613,7 @@ def test_ansible_collection(client: LudusClient, httpx_mock: HTTPXMock) -> None:
 def test_ansible_role_from_tar(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="PUT", url=_url("/ansible/role/fromtar"), json={"result": "ok"})
     client.ansible_role_from_tar(b"tardata", "role.tar.gz", force=True)
-    assert httpx_mock.get_request().url.path == "/ansible/role/fromtar"
+    assert httpx_mock.get_request().url.path == "/api/v2/ansible/role/fromtar"
 
 
 def test_ansible_role_vars(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -681,7 +682,7 @@ def test_group_create(client: LudusClient, httpx_mock: HTTPXMock) -> None:
 def test_group_delete(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="DELETE", url=_url("/groups/red-team"), json={})
     client.group_delete("red-team")
-    assert httpx_mock.get_request().url.path == "/groups/red-team"
+    assert httpx_mock.get_request().url.path == "/api/v2/groups/red-team"
 
 
 def test_group_users(client: LudusClient, httpx_mock: HTTPXMock) -> None:
@@ -745,7 +746,7 @@ def test_group_remove_ranges(client: LudusClient, httpx_mock: HTTPXMock) -> None
 def test_vm_destroy(client: LudusClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(method="DELETE", url=_url("/vm/114"), json={"result": "ok"})
     client.vm_destroy(114)
-    assert httpx_mock.get_request().url.path == "/vm/114"
+    assert httpx_mock.get_request().url.path == "/api/v2/vm/114"
 
 
 # ---------------------------------------------------------------------------

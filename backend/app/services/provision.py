@@ -52,6 +52,36 @@ class SessionNotFound(Exception):  # noqa: N818 -- spec-mandated name
     """Raised when ``session_id`` does not correspond to an existing session."""
 
 
+def quota_breaches(
+    *,
+    demand_cpus: int,
+    demand_ram_gb: int,
+    demand_vms: int,
+    demand_ranges: int,
+    cpu_quota: int | None,
+    ram_quota_gb: int | None,
+    vm_quota: int | None,
+    range_quota: int | None,
+) -> list[str]:
+    """List human-readable breaches of *_quota by the corresponding demand_*.
+
+    Shared by :class:`QuotaExceeded` (hard-block message) and the
+    ``GET /sessions/{id}/quota`` preflight endpoint, so the UI and the
+    server-side error always agree on which dimension(s) are over and by
+    how much.
+    """
+    breaches = []
+    if cpu_quota is not None and demand_cpus > cpu_quota:
+        breaches.append(f"CPU {demand_cpus} > quota {cpu_quota}")
+    if ram_quota_gb is not None and demand_ram_gb > ram_quota_gb:
+        breaches.append(f"RAM {demand_ram_gb}GB > quota {ram_quota_gb}GB")
+    if vm_quota is not None and demand_vms > vm_quota:
+        breaches.append(f"VMs {demand_vms} > quota {vm_quota}")
+    if range_quota is not None and demand_ranges > range_quota:
+        breaches.append(f"ranges {demand_ranges} > quota {range_quota}")
+    return breaches
+
+
 class QuotaExceeded(Exception):  # noqa: N818 -- consistent with SessionNotFound
     """Raised when a session's resource demand exceeds its configured budget.
 
@@ -82,15 +112,17 @@ class QuotaExceeded(Exception):  # noqa: N818 -- consistent with SessionNotFound
         self.vm_quota = vm_quota
         self.range_quota = range_quota
         self.student_count = student_count
-        breaches = []
-        if cpu_quota is not None and demand_cpus > cpu_quota:
-            breaches.append(f"CPU {demand_cpus} > quota {cpu_quota}")
-        if ram_quota_gb is not None and demand_ram_gb > ram_quota_gb:
-            breaches.append(f"RAM {demand_ram_gb}GB > quota {ram_quota_gb}GB")
-        if vm_quota is not None and demand_vms > vm_quota:
-            breaches.append(f"VMs {demand_vms} > quota {vm_quota}")
-        if range_quota is not None and demand_ranges > range_quota:
-            breaches.append(f"ranges {demand_ranges} > quota {range_quota}")
+        breaches = quota_breaches(
+            demand_cpus=demand_cpus,
+            demand_ram_gb=demand_ram_gb,
+            demand_vms=demand_vms,
+            demand_ranges=demand_ranges,
+            cpu_quota=cpu_quota,
+            ram_quota_gb=ram_quota_gb,
+            vm_quota=vm_quota,
+            range_quota=range_quota,
+        )
+        self.breaches = breaches
         super().__init__(
             "Session resource demand exceeds its quota ("
             + "; ".join(breaches)
@@ -876,4 +908,5 @@ __all__ = [
     "check_session_quota",
     "extract_role_names",
     "provision_session",
+    "quota_breaches",
 ]

@@ -1,9 +1,9 @@
 """Tests for the host-capacity service (app.services.capacity).
 
-Allocation is derived from *this app's own sessions* - only live
-(active/provisioning) sessions on the target server count, scaled by mode
-exactly like the provisioning quota check. Capacity comes from env (default)
-or the ludus_servers row (managed).
+Allocation is real CPU/RAM summed from Ludus's own live range list (``GET
+/range/all``) - every non-DESTROYED range on the target server, not just
+ranges this app created. Capacity comes from env (default) or the
+ludus_servers row (managed).
 """
 
 from __future__ import annotations
@@ -18,25 +18,18 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings
 from app.core.db import Base
-from app.models import (
-    LabTemplate,
-    LabTemplateMode,
-    SessionMode,
-    SessionStatus,
-    Student,
-    StudentStatus,
-)
-from app.models import Session as SessionRow
 from app.models.ludus_server import LudusServer
 from app.services import capacity as cap
+from app.services.proxmox import ProxmoxHostStats
 from app.services.resources import RangeResources
 
-# One range = 4+2 CPU, 8+4 GB = 6 CPU / 12 GB.
-RANGE_YAML = (
-    "ludus:\n"
-    "  - {vm_name: dc, ram_gb: 8, cpus: 4}\n"
-    "  - {vm_name: kali, ram_gb: 4, cpus: 2}\n"
-)
+
+def _vm(cpu: int, ram: int) -> dict:
+    return {"cpu": cpu, "ram": ram}
+
+
+def _range(range_id: str, vms: list[dict], *, state: str = "SUCCESS") -> dict:
+    return {"rangeID": range_id, "rangeState": state, "VMs": vms}
 
 
 @pytest.fixture
@@ -71,110 +64,38 @@ def _settings(**over) -> Settings:
     return Settings(**base)
 
 
-def _lab(db: OrmSession, *, server: str = "default", yaml_text: str = RANGE_YAML) -> LabTemplate:
-    lab = LabTemplate(
-        name="Lab",
-        range_config_yaml=yaml_text,
-        default_mode=LabTemplateMode.dedicated,
-        ludus_server=server,
-    )
-    db.add(lab)
-    db.commit()
-    db.refresh(lab)
-    return lab
+def test_allocation_sums_live_vms_across_ranges() -> None:
+    ranges = [
+        _range("JM", [_vm(4, 8), _vm(2, 4)]),
+        _range("team1", [_vm(1, 2)]),
+    ]
+    alloc = cap.compute_live_allocation(ranges)
+    assert alloc.resources == RangeResources(cpus=7, ram_gb=14, vm_count=3, range_count=2)
+    assert alloc.range_count == 2
 
 
-def _session(
-    db: OrmSession,
-    lab: LabTemplate,
-    *,
-    mode: SessionMode,
-    status: SessionStatus,
-    n_students: int,
-) -> SessionRow:
-    row = SessionRow(
-        name="S", lab_template_id=lab.id, mode=mode, status=status,
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    for i in range(n_students):
-        db.add(
-            Student(
-                session_id=row.id, full_name=f"S{i}", email=f"s{i}@example.com",
-                ludus_userid=f"u{i}_{row.id}", invite_token=f"t{i}_{row.id}",
-                # ready = a deployed range that counts toward allocation.
-                status=StudentStatus.ready,
-            )
-        )
-    db.commit()
-    return row
+def test_allocation_excludes_destroyed_ranges() -> None:
+    ranges = [
+        _range("JM", [_vm(4, 8)]),
+        _range("GHOST", [], state="DESTROYED"),
+    ]
+    alloc = cap.compute_live_allocation(ranges)
+    assert alloc.resources == RangeResources(cpus=4, ram_gb=8, vm_count=1, range_count=1)
 
 
-def test_allocation_sums_active_dedicated(db_session: OrmSession) -> None:
-    lab = _lab(db_session)
-    _session(db_session, lab, mode=SessionMode.dedicated, status=SessionStatus.active, n_students=2)
-    alloc = cap.compute_sessions_allocation(db_session, "default")
-    # dedicated 2 students x (6 CPU / 12 GB) = 12 CPU / 24 GB.
-    assert alloc.resources == RangeResources(cpus=12, ram_gb=24, vm_count=4, range_count=2)
-    assert alloc.session_count == 1
+def test_allocation_includes_ranges_not_created_by_this_app() -> None:
+    """The whole point of the live-data switch: ranges this app never
+    provisioned (e.g. created directly in Ludus) still count."""
+    ranges = [_range("legacy-range", [_vm(6, 12), _vm(2, 2)])]
+    alloc = cap.compute_live_allocation(ranges)
+    assert alloc.resources.cpus == 8
+    assert alloc.resources.ram_gb == 14
 
 
-def test_allocation_excludes_removed_ranges(db_session: OrmSession) -> None:
-    lab = _lab(db_session)
-    row = _session(
-        db_session, lab, mode=SessionMode.dedicated,
-        status=SessionStatus.active, n_students=3,
-    )
-    # Remove one student's range -> it no longer consumes resources.
-    removed = row.students[0]
-    removed.status = StudentStatus.range_removed
-    db_session.commit()
-    alloc = cap.compute_sessions_allocation(db_session, "default")
-    # 2 deployed x 6 CPU / 12 GB = 12 / 24 (the removed one drops out).
-    assert alloc.resources == RangeResources(cpus=12, ram_gb=24, vm_count=4, range_count=2)
-
-
-def test_allocation_shared_counts_one_range(db_session: OrmSession) -> None:
-    lab = _lab(db_session)
-    _session(db_session, lab, mode=SessionMode.shared, status=SessionStatus.active, n_students=10)
-    alloc = cap.compute_sessions_allocation(db_session, "default")
-    assert alloc.resources == RangeResources(cpus=6, ram_gb=12, vm_count=2, range_count=1)
-
-
-def test_allocation_excludes_draft_and_ended(db_session: OrmSession) -> None:
-    lab = _lab(db_session)
-    _session(db_session, lab, mode=SessionMode.dedicated, status=SessionStatus.draft, n_students=5)
-    _session(db_session, lab, mode=SessionMode.dedicated, status=SessionStatus.ended, n_students=5)
-    alloc = cap.compute_sessions_allocation(db_session, "default")
-    assert alloc.resources == RangeResources()  # nothing consuming
-    assert alloc.session_count == 0
-
-
-def test_allocation_includes_provisioning(db_session: OrmSession) -> None:
-    lab = _lab(db_session)
-    _session(
-        db_session, lab, mode=SessionMode.dedicated,
-        status=SessionStatus.provisioning, n_students=1,
-    )
-    alloc = cap.compute_sessions_allocation(db_session, "default")
-    assert alloc.resources == RangeResources(cpus=6, ram_gb=12, vm_count=2, range_count=1)
-    assert alloc.session_count == 1
-
-
-def test_allocation_filters_by_server(db_session: OrmSession) -> None:
-    lab_default = _lab(db_session, server="default")
-    lab_other = _lab(db_session, server="lab2")
-    _session(
-        db_session, lab_default, mode=SessionMode.dedicated,
-        status=SessionStatus.active, n_students=1,
-    )
-    _session(
-        db_session, lab_other, mode=SessionMode.dedicated,
-        status=SessionStatus.active, n_students=3,
-    )
-    assert cap.compute_sessions_allocation(db_session, "default").resources.cpus == 6
-    assert cap.compute_sessions_allocation(db_session, "lab2").resources.cpus == 18
+def test_allocation_empty_ranges_is_zero() -> None:
+    alloc = cap.compute_live_allocation([])
+    assert alloc.resources == RangeResources()
+    assert alloc.range_count == 0
 
 
 def test_resolve_capacity_default_and_db(db_session: OrmSession) -> None:
@@ -191,22 +112,20 @@ def test_resolve_capacity_default_and_db(db_session: OrmSession) -> None:
     assert cap.resolve_capacity(db_session, _settings(), "default") == (None, None)
 
 
-def test_build_view_available_and_session_count(db_session: OrmSession) -> None:
+def test_build_view_available_and_range_count(db_session: OrmSession) -> None:
     s = _settings(ludus_default_cpu_capacity=16, ludus_default_ram_capacity_gb=100)
-    lab = _lab(db_session)
-    _session(db_session, lab, mode=SessionMode.dedicated, status=SessionStatus.active, n_students=2)
-    view = cap.build_capacity_view(db_session, s, "default")
+    ranges = [_range("JM", [_vm(4, 8), _vm(2, 4)]), _range("team1", [_vm(6, 12)])]
+    view = cap.build_ranges_capacity_view(db_session, s, "default", ranges)
     assert view.configured is True
     assert view.cpu_allocated == 12 and view.ram_allocated_gb == 24
     assert view.cpu_available == 4  # 16 - 12
     assert view.ram_available_gb == 76  # 100 - 24
-    assert view.session_count == 1
+    assert view.range_count == 2
 
 
 def test_build_view_unconfigured(db_session: OrmSession) -> None:
-    lab = _lab(db_session)
-    _session(db_session, lab, mode=SessionMode.shared, status=SessionStatus.active, n_students=1)
-    view = cap.build_capacity_view(db_session, _settings(), "default")
+    ranges = [_range("team1", [_vm(6, 12)])]
+    view = cap.build_ranges_capacity_view(db_session, _settings(), "default", ranges)
     assert view.configured is False
     assert view.cpu_available is None and view.ram_available_gb is None
     assert view.cpu_allocated == 6  # allocation still computed
@@ -214,8 +133,58 @@ def test_build_view_unconfigured(db_session: OrmSession) -> None:
 
 def test_build_view_overcommit_negative(db_session: OrmSession) -> None:
     s = _settings(ludus_default_cpu_capacity=4, ludus_default_ram_capacity_gb=8)
-    lab = _lab(db_session)
-    _session(db_session, lab, mode=SessionMode.dedicated, status=SessionStatus.active, n_students=2)
-    view = cap.build_capacity_view(db_session, s, "default")
+    ranges = [_range("JM", [_vm(4, 8), _vm(2, 4)]), _range("team1", [_vm(6, 12)])]
+    view = cap.build_ranges_capacity_view(db_session, s, "default", ranges)
     assert view.cpu_available == -8  # 4 - 12
     assert view.ram_available_gb == -16  # 8 - 24
+
+
+# ---------------------------------------------------------------------------
+# Proxmox-sourced capacity view
+# ---------------------------------------------------------------------------
+
+_GIB = 1024**3
+
+
+def test_proxmox_view_converts_bytes_and_fraction() -> None:
+    stats = ProxmoxHostStats(
+        node="pve",
+        cpu_count=16,
+        cpu_fraction=0.25,
+        mem_total_bytes=round(93.61 * _GIB),
+        mem_used_bytes=round(25.14 * _GIB),
+        storage_total_bytes=round(8.95 * 1024**4),
+        storage_used_bytes=round(5.58 * 1024**4),
+    )
+    ranges = [_range("JM", [_vm(4, 8), _vm(2, 4)]), _range("team1", [_vm(1, 2)])]
+    view = cap.build_proxmox_capacity_view("default", stats, ranges)
+    assert view.source == "proxmox"
+    assert view.node == "pve"
+    assert view.configured is True
+    assert view.cpu_capacity == 16
+    assert view.cpu_allocated == 4  # round(0.25 * 16)
+    assert view.cpu_available == 12
+    assert view.ram_capacity_gb == pytest.approx(93.61, abs=0.01)
+    assert view.ram_allocated_gb == pytest.approx(25.14, abs=0.01)
+    assert view.ram_available_gb == pytest.approx(68.47, abs=0.01)
+    assert view.storage_capacity_gb == pytest.approx(9164.8, abs=1)
+    assert view.storage_used_gb == pytest.approx(5713.9, abs=1)
+    assert view.storage_available_gb == pytest.approx(3450.9, abs=1)
+    # "All VMs busy at once" planning figure, independent of live load above.
+    assert view.range_count == 2
+    assert view.vm_count == 3
+    assert view.committed_cpus == 7
+    assert view.committed_ram_gb == 14
+
+
+def test_proxmox_view_with_no_ranges_has_zero_committed() -> None:
+    stats = ProxmoxHostStats(
+        node="pve", cpu_count=16, cpu_fraction=0.0,
+        mem_total_bytes=0, mem_used_bytes=0,
+        storage_total_bytes=0, storage_used_bytes=0,
+    )
+    view = cap.build_proxmox_capacity_view("default", stats, [])
+    assert view.vm_count == 0
+    assert view.committed_cpus == 0
+    assert view.committed_ram_gb == 0
+    assert view.range_count == 0

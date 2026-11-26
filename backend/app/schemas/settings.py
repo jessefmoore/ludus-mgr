@@ -16,6 +16,10 @@ class PlatformSettingsResponse(BaseModel):
     admin_email: str
     invite_token_ttl_hours: int
     public_base_url: str
+    # Proxmox host that Ludus/Proxmox-credential logins (see
+    # app.services.ludus_auth) are validated against. None if it can't be
+    # derived (e.g. ludus_server_url has no parseable host).
+    proxmox_login_url: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):

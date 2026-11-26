@@ -355,6 +355,41 @@ class LudusRangeUsersResponse(BaseModel):
     users: list[LudusRangeUser]
 
 
+class LudusOrphanedRangesResponse(BaseModel):
+    """Range IDs with no Ludus user/group holding access to them.
+
+    Ludus never removes a range's row from ``GET /range/all`` once its
+    owning user is deleted - the row persists forever (state unchanged from
+    whatever it was at deletion time, VMs long gone). ``GET
+    /ranges/{rangeID}/users`` returning empty is the only reliable signal,
+    since a range's ``rangeID`` does not necessarily match any single
+    owner's ``userID``.
+    """
+
+    range_ids: list[str]
+
+
+class LudusRangeDiagnosticsResponse(BaseModel):
+    """Bundled diagnostic info for one range.
+
+    Powers a "why is this range in this state" panel in the Ranges tab, so
+    a lab manager can see what we see when investigating an ERROR/orphaned
+    range without reading raw Ludus API responses by hand.
+    """
+
+    range_id: str
+    range_state: str | None = None
+    owners: list[LudusRangeUser] = []
+    orphaned: bool
+    # Error from a direct GET /range?rangeID= lookup, if that call fails
+    # (e.g. "pool does not exist" for a range whose Proxmox pool is gone).
+    detail_error: str | None = None
+    log_history: list[LudusLogHistoryEntry] = []
+    # Full content of the most recent log_history entry, when one exists.
+    latest_log_status: str | None = None
+    latest_log_content: str | None = None
+
+
 class LudusAccessibleRange(BaseModel):
     """A range accessible to the current user."""
 
@@ -599,21 +634,37 @@ class AnsibleCollectionRequest(BaseModel):
 
 
 class LudusCapacityResponse(BaseModel):
-    """Host CPU/RAM capacity vs this app's committed session allocation.
+    """Host CPU/RAM/storage capacity vs. real usage for one server.
 
-    ``configured`` is False when no capacity has been set, in which case the
-    ``*_available`` fields are null and the UI prompts the operator to
-    configure the host's totals. ``*_allocated`` is the CPU/RAM committed by
-    the app's live (active/provisioning) sessions on this server. Available may
-    be negative when overcommitted - reported truthfully, not clamped.
+    ``source`` is ``"proxmox"`` (real, measured host stats - see
+    ``app.services.proxmox``) when a Proxmox API token is configured for
+    this server, else ``"ranges"`` (manually-configured capacity vs. a live
+    sum of Ludus's own range list - see ``app.services.capacity``).
+    ``configured`` is False when no capacity has been set at all, in which
+    case the ``*_available`` fields are null and the UI prompts the operator
+    to configure it. Available may be negative when overcommitted - reported
+    truthfully, not clamped. ``storage_*`` fields are only populated for the
+    ``"proxmox"`` source; Ludus has no concept of host disk capacity.
     """
 
     server: str
     configured: bool
+    source: str
+    node: str | None = None
     cpu_capacity: int | None = None
-    ram_capacity_gb: int | None = None
+    ram_capacity_gb: float | None = None
     cpu_allocated: int
-    ram_allocated_gb: int
+    ram_allocated_gb: float
     cpu_available: int | None = None
-    ram_available_gb: int | None = None
-    session_count: int
+    ram_available_gb: float | None = None
+    range_count: int
+    storage_capacity_gb: float | None = None
+    storage_used_gb: float | None = None
+    storage_available_gb: float | None = None
+    # VM-declared CPU/RAM committed across every live range - "all VMs busy
+    # at once" planning figure, independent of current live load. Only
+    # populated for the "proxmox" source (for "ranges", cpu_allocated/
+    # ram_allocated_gb already are this number).
+    vm_count: int = 0
+    committed_cpus: int | None = None
+    committed_ram_gb: float | None = None

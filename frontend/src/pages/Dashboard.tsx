@@ -13,6 +13,7 @@ import {
   Server,
   Cpu,
   MemoryStick,
+  HardDrive,
   Trash2,
 } from "lucide-react";
 import { sessions, labs, ludus, ApiError } from "@/api";
@@ -399,6 +400,7 @@ function CapacityBar({
   capacity,
   available,
   unit,
+  format = (n: number) => String(n),
 }: {
   icon: ReactNode;
   label: string;
@@ -406,6 +408,7 @@ function CapacityBar({
   capacity: number | null;
   available: number | null;
   unit: string;
+  format?: (n: number) => string;
 }) {
   const over = available != null && available < 0;
   // Fill fraction of allocation against capacity; capped at 100% for the bar.
@@ -419,14 +422,14 @@ function CapacityBar({
           {label}
         </span>
         {capacity == null ? (
-          <span className="text-text-muted">{allocated} {unit} allocated · capacity not set</span>
+          <span className="text-text-muted">{format(allocated)} {unit} allocated · capacity not set</span>
         ) : over ? (
           <span className="text-accent-danger font-medium">
-            overcommitted by {Math.abs(available!)} {unit}
+            overcommitted by {format(Math.abs(available!))} {unit}
           </span>
         ) : (
           <span className="text-text-primary">
-            <span className="font-semibold text-accent-success">{available} {unit}</span> free
+            <span className="font-semibold text-accent-success">{format(available!)} {unit}</span> free
           </span>
         )}
       </div>
@@ -438,14 +441,28 @@ function CapacityBar({
       </div>
       {capacity != null && (
         <div className="text-xs text-text-muted">
-          {allocated} / {capacity} {unit} committed by active sessions
+          {format(allocated)} / {format(capacity)} {unit} in use on the host
         </div>
       )}
     </div>
   );
 }
 
+const fmt1 = (n: number) => n.toFixed(n % 1 === 0 ? 0 : 1);
+const fmt2 = (n: number) => n.toFixed(2);
+
+// Proxmox reports storage in GiB; scale to TiB once it's into four digits so
+// a host like "9164.8 GiB" reads as "8.95 TiB" instead.
+function storageUnitAndDivisor(totalGb: number): { unit: string; divisor: number } {
+  return totalGb >= 1024 ? { unit: "TiB", divisor: 1024 } : { unit: "GiB", divisor: 1 };
+}
+
 function HostCapacityCard({ capacity }: { capacity: LudusCapacity }) {
+  const isProxmox = capacity.source === "proxmox";
+  const { unit: storageUnit, divisor: storageDivisor } = storageUnitAndDivisor(
+    capacity.storage_capacity_gb ?? 0,
+  );
+
   return (
     <Card variant="stat" className="space-y-3">
       <div className="flex items-center justify-between">
@@ -453,10 +470,11 @@ function HostCapacityCard({ capacity }: { capacity: LudusCapacity }) {
           <Server className="h-4 w-4" />
           <span className="text-[13px] uppercase tracking-wider font-medium">
             Host Capacity{capacity.server !== "default" ? ` · ${capacity.server}` : ""}
+            {isProxmox && capacity.node ? ` · ${capacity.node}` : ""}
           </span>
         </div>
         <span className="text-xs text-text-muted">
-          {capacity.session_count} active session{capacity.session_count === 1 ? "" : "s"}
+          {capacity.range_count} live range{capacity.range_count === 1 ? "" : "s"}
         </span>
       </div>
 
@@ -475,19 +493,68 @@ function HostCapacityCard({ capacity }: { capacity: LudusCapacity }) {
         capacity={capacity.ram_capacity_gb}
         available={capacity.ram_available_gb}
         unit="GB"
+        format={fmt1}
       />
+      {isProxmox && capacity.storage_capacity_gb != null && (
+        <CapacityBar
+          icon={<HardDrive className="h-3.5 w-3.5" />}
+          label="Storage"
+          allocated={(capacity.storage_used_gb ?? 0) / storageDivisor}
+          capacity={capacity.storage_capacity_gb / storageDivisor}
+          available={
+            capacity.storage_available_gb != null
+              ? capacity.storage_available_gb / storageDivisor
+              : null
+          }
+          unit={storageUnit}
+          format={fmt2}
+        />
+      )}
+
+      {isProxmox && capacity.committed_cpus != null && (
+        <div className="space-y-2 pt-1 border-t border-border">
+          <p className="text-xs text-text-muted">
+            If every VM ran at once ({capacity.vm_count} VM{capacity.vm_count === 1 ? "" : "s"}
+            {" "}across {capacity.range_count} range{capacity.range_count === 1 ? "" : "s"}) -
+            independent of current load above:
+          </p>
+          <CapacityBar
+            icon={<Cpu className="h-3.5 w-3.5" />}
+            label="CPU cores"
+            allocated={capacity.committed_cpus}
+            capacity={capacity.cpu_capacity}
+            available={
+              capacity.cpu_capacity != null ? capacity.cpu_capacity - capacity.committed_cpus : null
+            }
+            unit="cores"
+          />
+          <CapacityBar
+            icon={<MemoryStick className="h-3.5 w-3.5" />}
+            label="RAM"
+            allocated={capacity.committed_ram_gb ?? 0}
+            capacity={capacity.ram_capacity_gb}
+            available={
+              capacity.ram_capacity_gb != null && capacity.committed_ram_gb != null
+                ? capacity.ram_capacity_gb - capacity.committed_ram_gb
+                : null
+            }
+            unit="GB"
+            format={fmt1}
+          />
+        </div>
+      )}
 
       {!capacity.configured && (
         <p className="text-[13px] text-text-muted">
-          Set this host's total CPU/RAM (LUDUS_DEFAULT_CPU_CAPACITY /
-          LUDUS_DEFAULT_RAM_CAPACITY_GB, or per-server in Settings) to see how much
-          is left to assign.
+          Set PROXMOX_API_TOKEN (see README) for real host stats, or
+          LUDUS_DEFAULT_CPU_CAPACITY / LUDUS_DEFAULT_RAM_CAPACITY_GB (per-server in
+          Settings) for the live-range-sum fallback.
         </p>
       )}
       <p className="text-[13px] text-text-muted">
-        Allocated = CPU/RAM committed by your active sessions (dedicated counts one
-        range per student; shared counts one). Ranges created outside this app are
-        not included.
+        {isProxmox
+          ? "Real, measured CPU/RAM/storage usage from the Proxmox host itself (CPU shown as a core-equivalent of current load, not a reservation count)."
+          : "Allocated = real CPU/RAM summed from every live range on this Ludus server (per Ludus's own data), not just ranges this app created. Set PROXMOX_API_TOKEN for real host stats instead."}
       </p>
     </Card>
   );

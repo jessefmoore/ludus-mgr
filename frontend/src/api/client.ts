@@ -29,6 +29,8 @@ import type {
   LudusLogEntryDetailResponse,
   LudusTextResponse,
   LudusRangeUsersResponse,
+  LudusOrphanedRangesResponse,
+  LudusRangeDiagnosticsResponse,
   LudusAccessibleRangesResponse,
   LudusSnapshotListResponse,
   LudusTemplateListResponse,
@@ -489,6 +491,14 @@ export const ludus = {
 
   rangeUsers: (rangeId: string, server?: string) =>
     request<LudusRangeUsersResponse>(`/api/ludus/ranges/${encodeURIComponent(rangeId)}/users${serverQs(server)}`),
+
+  orphanedRanges: (server?: string) =>
+    request<LudusOrphanedRangesResponse>(`/api/ludus/ranges/orphaned${serverQs(server)}`),
+
+  rangeDiagnostics: (rangeId: string, server?: string) =>
+    request<LudusRangeDiagnosticsResponse>(
+      `/api/ludus/ranges/${encodeURIComponent(rangeId)}/diagnostics${serverQs(server)}`,
+    ),
 
   accessibleRanges: (server?: string) =>
     request<LudusAccessibleRangesResponse>(`/api/ludus/ranges/accessible${serverQs(server)}`),

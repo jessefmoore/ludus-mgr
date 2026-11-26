@@ -580,7 +580,9 @@ export default function SessionDetail() {
                   disabled={quota ? !quota.within_quota : false}
                   title={
                     quota && !quota.within_quota
-                      ? "Session demand exceeds its resource budget"
+                      ? quota.breaches.length > 0
+                        ? `Blocked: ${quota.breaches.join("; ")}`
+                        : "Session demand exceeds its resource budget"
                       : undefined
                   }
                 >
@@ -990,29 +992,37 @@ export default function SessionDetail() {
 
 function QuotaMeter({
   label,
-  allocated,
+  demand,
+  deployed,
   quota,
   unit,
   over,
 }: {
   label: string;
-  allocated: number;
+  // Full planned footprint (pending students included) - this is what
+  // actually gates Provision All, so it drives the bar and the "over" color.
+  demand: number;
+  // Footprint of ranges that are already deployed/ready right now.
+  deployed: number;
   quota: number | null;
   unit: string;
   over: boolean;
 }) {
-  const pct = quota ? Math.min((allocated / quota) * 100, 100) : 0;
+  const pct = quota ? Math.min((demand / quota) * 100, 100) : 0;
   const barColor = over ? "bg-accent-danger" : "bg-accent-success";
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-[13px]">
         <span className="text-text-secondary">{label}</span>
         <span className={over ? "text-accent-danger font-medium" : "text-text-primary"}>
-          <span className="font-semibold">{allocated}</span> allocated
+          <span className="font-semibold">{demand}</span> planned
           {quota != null ? (
             <> / <span className="font-semibold">{quota}</span> quota {unit}</>
           ) : (
             <span className="text-text-muted"> · no quota set</span>
+          )}
+          {deployed !== demand && (
+            <span className="text-text-muted"> ({deployed} deployed now)</span>
           )}
         </span>
       </div>
@@ -1132,12 +1142,15 @@ function QuotaCard({
   onSaved: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  // Meters show what's actually deployed (allocated); it drops when a range is
-  // removed. The over-budget block still keys off the full planned footprint.
-  const overCpu = quota.cpu_quota != null && quota.allocated_cpus > quota.cpu_quota;
-  const overRam = quota.ram_quota_gb != null && quota.allocated_ram_gb > quota.ram_quota_gb;
-  const overVms = quota.vm_quota != null && quota.allocated_vms > quota.vm_quota;
-  const overRanges = quota.range_quota != null && quota.allocated_ranges > quota.range_quota;
+  // Meters key off demand_* (the full planned footprint, pending students
+  // included) rather than allocated_* (only already-deployed ranges) -
+  // demand is what actually gates Provision All, so a pending student whose
+  // footprint doesn't fit shows up as "over" immediately instead of staying
+  // green until someone tries (and fails) to provision them.
+  const overCpu = quota.cpu_quota != null && quota.demand_cpus > quota.cpu_quota;
+  const overRam = quota.ram_quota_gb != null && quota.demand_ram_gb > quota.ram_quota_gb;
+  const overVms = quota.vm_quota != null && quota.demand_vms > quota.vm_quota;
+  const overRanges = quota.range_quota != null && quota.demand_ranges > quota.range_quota;
   const hasBudget =
     quota.cpu_quota != null ||
     quota.ram_quota_gb != null ||
@@ -1196,37 +1209,50 @@ function QuotaCard({
         <>
           <QuotaMeter
             label="CPU cores"
-            allocated={quota.allocated_cpus}
+            demand={quota.demand_cpus}
+            deployed={quota.allocated_cpus}
             quota={quota.cpu_quota}
             unit="cores"
             over={overCpu}
           />
           <QuotaMeter
             label="RAM"
-            allocated={quota.allocated_ram_gb}
+            demand={quota.demand_ram_gb}
+            deployed={quota.allocated_ram_gb}
             quota={quota.ram_quota_gb}
             unit="GB"
             over={overRam}
           />
           <QuotaMeter
             label="VMs"
-            allocated={quota.allocated_vms}
+            demand={quota.demand_vms}
+            deployed={quota.allocated_vms}
             quota={quota.vm_quota}
             unit="VMs"
             over={overVms}
           />
           <QuotaMeter
             label="Ranges"
-            allocated={quota.allocated_ranges}
+            demand={quota.demand_ranges}
+            deployed={quota.allocated_ranges}
             quota={quota.range_quota}
             unit="ranges"
             over={overRanges}
           />
 
           {!quota.within_quota && (
-            <div className="p-2.5 rounded-md bg-accent-danger/10 border border-accent-danger/30 text-[13px] text-accent-danger">
-              Allocation exceeds the session budget — provisioning is blocked until you raise
-              the quota, switch to shared mode, or reduce students.
+            <div className="p-2.5 rounded-md bg-accent-danger/10 border border-accent-danger/30 text-[13px] text-accent-danger space-y-1">
+              <p>
+                Provisioning is blocked — demand exceeds the session budget. Raise the quota,
+                switch to shared mode, or reduce students.
+              </p>
+              {quota.breaches.length > 0 && (
+                <ul className="list-disc list-inside font-mono text-[12px] opacity-90">
+                  {quota.breaches.map((b) => (
+                    <li key={b}>{b}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
           {!hasBudget && (

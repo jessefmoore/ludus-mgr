@@ -31,10 +31,12 @@ from app.schemas.ludus import (
     LudusLogEntryDetailResponse,
     LudusLogHistoryEntry,
     LudusLogHistoryResponse,
+    LudusOrphanedRangesResponse,
     LudusRange,
     LudusRangeConfigResponse,
     LudusRangeDetail,
     LudusRangeDetailResponse,
+    LudusRangeDiagnosticsResponse,
     LudusRangeListResponse,
     LudusRangeLogsResponse,
     LudusRangeTagsResponse,
@@ -63,6 +65,7 @@ from app.schemas.ludus import (
 from app.services import capacity as capacity_service
 from app.services.exceptions import LudusError, LudusNotFound, LudusRangeExists, LudusUserExists
 from app.services.ludus import LudusClient
+from app.services.proxmox import ProxmoxClient, ProxmoxError
 
 logger = logging.getLogger(__name__)
 
@@ -107,27 +110,48 @@ def get_host_capacity(
     db: DBSession = Depends(get_db),  # noqa: B008 -- FastAPI idiom
     settings: Settings = Depends(get_settings),  # noqa: B008 -- FastAPI idiom
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
+    registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
 ) -> LudusCapacityResponse:
-    """Host CPU/RAM capacity vs this app's committed session allocation.
+    """Host CPU/RAM/storage capacity vs real usage.
 
-    Powers the dashboard's "how much can I still assign" card. Capacity is
-    the manually-configured host total (env for ``default``, DB row for
-    managed servers); allocation is summed from the app's live sessions
-    (active/provisioning) whose lab template targets this server - external
-    Ludus ranges are intentionally excluded.
+    Powers the dashboard's "how much can I still assign" card. Prefers real,
+    measured Proxmox host stats (``PROXMOX_API_TOKEN`` configured, currently
+    only wired for the ``default`` server) over the manually-configured
+    capacity + live-Ludus-range-sum fallback used otherwise - see
+    ``app.services.capacity`` for why that fallback alone used to understate
+    real host load. Ludus's range list is fetched either way: for the
+    fallback it's the whole computation, and for the Proxmox path it still
+    drives the "all VMs busy at once" committed-CPU/RAM planning figure
+    alongside the real, measured numbers.
     """
-    view = capacity_service.build_capacity_view(db, settings, server)
-    return LudusCapacityResponse(
-        server=view.server,
-        configured=view.configured,
-        cpu_capacity=view.cpu_capacity,
-        ram_capacity_gb=view.ram_capacity_gb,
-        cpu_allocated=view.cpu_allocated,
-        ram_allocated_gb=view.ram_allocated_gb,
-        cpu_available=view.cpu_available,
-        ram_available_gb=view.ram_available_gb,
-        session_count=view.session_count,
-    )
+    ludus = _resolve_client(registry, server)
+    try:
+        ranges = ludus.range_list()
+    except LudusError as exc:
+        logger.warning("Ludus range_list failed while computing capacity: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Ludus error: {exc}",
+        ) from exc
+
+    if server == "default" and settings.proxmox_api_token:
+        proxmox = ProxmoxClient(
+            url=settings.resolved_proxmox_url or "",
+            api_token=settings.proxmox_api_token,
+            verify_tls=settings.proxmox_verify_tls,
+        )
+        try:
+            stats = proxmox.host_stats(settings.proxmox_node)
+        except ProxmoxError as exc:
+            logger.warning("Proxmox host_stats failed, falling back to range sum: %s", exc)
+        else:
+            view = capacity_service.build_proxmox_capacity_view(server, stats, ranges)
+            return LudusCapacityResponse(**view.__dict__)
+        finally:
+            proxmox.close()
+
+    view = capacity_service.build_ranges_capacity_view(db, settings, server, ranges)
+    return LudusCapacityResponse(**view.__dict__)
 
 
 @router.get("/ranges/{range_id}/config", response_model=LudusRangeConfigResponse)
@@ -1101,6 +1125,117 @@ def get_range_users(
 
     users = [LudusRangeUser.model_validate(u) for u in raw]
     return LudusRangeUsersResponse(users=users)
+
+
+@router.get("/ranges/orphaned", response_model=LudusOrphanedRangesResponse)
+def list_orphaned_ranges(
+    server: str = "default",
+    _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
+    registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
+) -> LudusOrphanedRangesResponse:
+    """Find ranges with no Ludus user/group holding access to them.
+
+    Calls ``GET /ranges/{rangeID}/users`` for every range Ludus reports, since
+    a range's ``rangeID`` doesn't necessarily match any single owner's
+    ``userID`` (ranges can be owned by a different user, or shared by
+    several) - string-matching IDs would misclassify both directions. A
+    per-range lookup failure is treated as "unknown", never "orphaned", so a
+    transient error can't cause a live range to be hidden.
+    """
+    ludus = _resolve_client(registry, server)
+    try:
+        ranges = ludus.range_list()
+    except LudusError as exc:
+        logger.warning("Ludus range_list failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Ludus error: {exc}",
+        ) from exc
+
+    orphaned: list[str] = []
+    for r in ranges:
+        range_id = r.get("rangeID")
+        if not range_id:
+            continue
+        try:
+            owners = ludus.range_users(range_id)
+        except LudusError as exc:
+            logger.warning("Ludus range_users(%s) failed: %s", range_id, exc)
+            continue
+        if not owners:
+            orphaned.append(range_id)
+
+    return LudusOrphanedRangesResponse(range_ids=orphaned)
+
+
+@router.get("/ranges/{range_id}/diagnostics", response_model=LudusRangeDiagnosticsResponse)
+def get_range_diagnostics(
+    range_id: str,
+    server: str = "default",
+    _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
+    registry: LudusClientRegistry = Depends(get_ludus_client_registry),  # noqa: B008
+) -> LudusRangeDiagnosticsResponse:
+    """Bundle everything needed to explain a range's current state.
+
+    Combines range ownership (orphaned?), the last direct-lookup error (if
+    the range's Proxmox pool is gone), and the full deploy log history +
+    latest log content - the same calls made by hand to diagnose a range
+    showing ERROR or sitting orphaned, bundled into one request for the
+    Ranges tab's "why" panel.
+    """
+    ludus = _resolve_client(registry, server)
+
+    try:
+        owners = [LudusRangeUser.model_validate(u) for u in ludus.range_users(range_id)]
+    except LudusError as exc:
+        logger.warning("Ludus range_users(%s) failed: %s", range_id, exc)
+        owners = []
+
+    range_state: str | None = None
+    try:
+        for r in ludus.range_list():
+            if r.get("rangeID") == range_id:
+                range_state = r.get("rangeState")
+                break
+    except LudusError as exc:
+        logger.warning("Ludus range_list failed while diagnosing %s: %s", range_id, exc)
+
+    detail_error: str | None = None
+    try:
+        ludus.range_get_vms(range_id=range_id)
+    except LudusError as exc:
+        detail_error = str(exc)
+
+    try:
+        history_raw = ludus.range_logs_history(range_id=range_id)
+    except LudusError as exc:
+        logger.warning("Ludus range_logs_history(%s) failed: %s", range_id, exc)
+        history_raw = []
+    log_history = [LudusLogHistoryEntry.model_validate(e) for e in history_raw]
+
+    latest_log_status: str | None = None
+    latest_log_content: str | None = None
+    if log_history:
+        latest = max(log_history, key=lambda e: e.created or e.start or "")
+        if latest.id:
+            try:
+                entry = ludus.range_log_entry(latest.id, range_id=range_id)
+            except LudusError as exc:
+                logger.warning("Ludus range_log_entry(%s) failed: %s", latest.id, exc)
+            else:
+                latest_log_status = entry.get("status")
+                latest_log_content = entry.get("result")
+
+    return LudusRangeDiagnosticsResponse(
+        range_id=range_id,
+        range_state=range_state,
+        owners=owners,
+        orphaned=len(owners) == 0,
+        detail_error=detail_error,
+        log_history=log_history,
+        latest_log_status=latest_log_status,
+        latest_log_content=latest_log_content,
+    )
 
 
 @router.get("/ranges/accessible", response_model=LudusAccessibleRangesResponse)

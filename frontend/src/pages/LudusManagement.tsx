@@ -23,6 +23,7 @@ import {
 import { ludus, ludusTesting, ludusGroups, ludusAnsible, settings as settingsApi, ApiError } from "@/api";
 import type {
   LudusRange,
+  LudusRangeDiagnosticsResponse,
   LudusSnapshot,
   LudusTemplate,
   LudusServerInfo,
@@ -43,6 +44,35 @@ import PageTransition from "@/components/PageTransition";
 import { useToast } from "@/components/Toast";
 import RangeStatePill from "@/components/RangeStatePill";
 import LogViewer from "@/components/LogViewer";
+
+// Ludus v2 never removes a destroyed range's row from GET /range/all - it
+// keeps the range object with numberOfVMs: 0 and rangeState: "DESTROYED"
+// forever (tied to the owning user). There's no server-side way to purge it
+// short of deleting the Ludus user itself, so "removing" a destroyed range
+// from this UI means filtering it out client-side everywhere ranges are
+// listed or offered as a pick target.
+function isLiveRange(r: LudusRange, orphanedIds: Set<string>): boolean {
+  if (r.rangeState === "DESTROYED") return false;
+  if (r.rangeID && orphanedIds.has(r.rangeID)) return false;
+  return (r.numberOfVMs ?? 0) > 0 || (!!r.rangeState && r.rangeState !== "NEVER DEPLOYED");
+}
+
+// Ranges whose owning Ludus user was deleted - the range row is never
+// removed, so this is the only reliable "is this range still reachable by
+// anyone" signal (a range's rangeID doesn't necessarily match its owner's
+// userID, so we can't infer this from the range list alone). Fetched once
+// per mount; stays stable for the component's lifetime since ownership
+// rarely changes and this costs one Ludus call per range server-side.
+function useOrphanedRanges(server: string): Set<string> {
+  const [orphanedIds, setOrphanedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    ludus
+      .orphanedRanges(server)
+      .then((res) => setOrphanedIds(new Set(res.range_ids)))
+      .catch(() => {});
+  }, [server]);
+  return orphanedIds;
+}
 
 const TAB_GROUPS: TabGroup[] = [
   {
@@ -143,6 +173,7 @@ export default function LudusManagement() {
 
 function RangesTab({ server }: { server: string }) {
   const { toast } = useToast();
+  const orphanedIds = useOrphanedRanges(server);
   const [ranges, setRanges] = useState<LudusRange[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeOps, setActiveOps] = useState<Map<number, string>>(new Map());
@@ -153,6 +184,7 @@ function RangesTab({ server }: { server: string }) {
     action: () => Promise<void>;
   } | null>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [diagnosticsRange, setDiagnosticsRange] = useState<LudusRange | null>(null);
 
   const addOp = (rangeNumber: number, op: string) => {
     setActiveOps((prev) => new Map(prev).set(rangeNumber, op));
@@ -164,9 +196,7 @@ function RangesTab({ server }: { server: string }) {
     ludus
       .ranges(server)
       .then(async (rangesRes) => {
-        const filtered = rangesRes.ranges.filter(
-          (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
-        );
+        const filtered = rangesRes.ranges.filter((r) => isLiveRange(r, orphanedIds));
         setRanges(filtered);
         // Auto-detect in-progress operations from range state
         const detected = new Map<number, string>();
@@ -195,7 +225,7 @@ function RangesTab({ server }: { server: string }) {
         }),
       )
       .finally(() => setLoading(false));
-  }, [toast, server]);
+  }, [toast, server, orphanedIds]);
 
   useEffect(fetchRanges, [fetchRanges]);
 
@@ -206,15 +236,13 @@ function RangesTab({ server }: { server: string }) {
       ludus
         .ranges(server)
         .then((rangesRes) => {
-          const filtered = rangesRes.ranges.filter(
-            (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
-          );
+          const filtered = rangesRes.ranges.filter((r) => isLiveRange(r, orphanedIds));
           setRanges(filtered);
         })
         .catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
-  }, [activeOps.size, server]);
+  }, [activeOps.size, server, orphanedIds]);
 
   // Poll while there are active operations
   useEffect(() => {
@@ -224,9 +252,7 @@ function RangesTab({ server }: { server: string }) {
       ludus
         .ranges(server)
         .then((rangesRes) => {
-          const filtered = rangesRes.ranges.filter(
-            (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
-          );
+          const filtered = rangesRes.ranges.filter((r) => isLiveRange(r, orphanedIds));
           setRanges(filtered);
 
           // Check each active op for completion
@@ -273,7 +299,7 @@ function RangesTab({ server }: { server: string }) {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [activeOps.size, server, toast]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeOps.size, server, toast, orphanedIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePowerOn = (range: LudusRange) => {
     ludus
@@ -364,9 +390,21 @@ function RangesTab({ server }: { server: string }) {
     {
       key: "state",
       label: "State",
-      render: (r) => (
-        <RangeStatePill state={activeOps.get(r.rangeNumber) || r.rangeState || "UNKNOWN"} />
-      ),
+      render: (r) => {
+        const state = activeOps.get(r.rangeNumber) || r.rangeState || "UNKNOWN";
+        const pill = <RangeStatePill state={state} />;
+        if (state !== "ERROR") return pill;
+        return (
+          <button
+            type="button"
+            onClick={() => setDiagnosticsRange(r)}
+            title="Click for details"
+            className="cursor-pointer hover:opacity-80 transition-opacity"
+          >
+            {pill}
+          </button>
+        );
+      },
     },
     {
       key: "lastDeploy",
@@ -428,6 +466,12 @@ function RangesTab({ server }: { server: string }) {
         }
       />
 
+      <RangeDiagnosticsModal
+        range={diagnosticsRange}
+        server={server}
+        onClose={() => setDiagnosticsRange(null)}
+      />
+
       <Modal
         open={!!confirmModal}
         onClose={() => !confirmLoading && setConfirmModal(null)}
@@ -449,11 +493,148 @@ function RangesTab({ server }: { server: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Range Diagnostics Modal - "why is this range in this state"
+// ---------------------------------------------------------------------------
+
+// Log history entries report lowercase outcome strings (success/failure/
+// running/aborted) rather than the uppercase deploy-state vocabulary
+// RangeStatePill knows about - map them so a failed/running log entry gets
+// the same red/spinning treatment as a live range in that state.
+function logHistoryPillState(status: string | undefined): string {
+  switch (status) {
+    case "success":
+      return "SUCCESS";
+    case "failure":
+      return "ERROR";
+    case "running":
+      return "DEPLOYING";
+    default:
+      return status || "UNKNOWN";
+  }
+}
+
+function RangeDiagnosticsModal({
+  range,
+  server,
+  onClose,
+}: {
+  range: LudusRange | null;
+  server: string;
+  onClose: () => void;
+}) {
+  const [diagnostics, setDiagnostics] = useState<LudusRangeDiagnosticsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!range?.rangeID) return;
+    setLoading(true);
+    setError("");
+    setDiagnostics(null);
+    ludus
+      .rangeDiagnostics(range.rangeID, server)
+      .then(setDiagnostics)
+      .catch((err) => setError(err instanceof ApiError ? err.detail : "Failed to load diagnostics"))
+      .finally(() => setLoading(false));
+  }, [range, server]);
+
+  return (
+    <Modal
+      open={!!range}
+      onClose={onClose}
+      title={`Range Diagnostics — ${range?.name || range?.rangeID || ""}`}
+      size="lg"
+    >
+      {loading ? (
+        <TableSkeleton rows={4} cols={2} />
+      ) : error ? (
+        <p className="text-[14px] text-accent-danger">{error}</p>
+      ) : diagnostics ? (
+        <div className="space-y-4">
+          {diagnostics.orphaned ? (
+            <div className="p-3 rounded-md bg-accent-danger/10 border border-accent-danger/30 text-[13px] text-accent-danger">
+              No Ludus user or group has access to this range — its owner was deleted.
+              This is a permanent, unrecoverable leftover; Ludus never removes the range's
+              own row once that happens.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className="text-[13px] uppercase tracking-wider text-text-secondary">
+                Has access
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {diagnostics.owners.map((u) => (
+                  <span
+                    key={u.userID}
+                    className="px-2 py-1 rounded-md bg-bg-elevated border border-border text-[13px] font-mono text-text-primary"
+                  >
+                    {u.userID}
+                    {u.name ? ` (${u.name})` : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {diagnostics.detail_error && (
+            <div className="space-y-1">
+              <p className="text-[13px] uppercase tracking-wider text-text-secondary">
+                Lookup error
+              </p>
+              <p className="p-2.5 rounded-md bg-accent-danger/10 border border-accent-danger/30 text-[13px] font-mono text-accent-danger">
+                {diagnostics.detail_error}
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <p className="text-[13px] uppercase tracking-wider text-text-secondary">
+              Deploy log history
+            </p>
+            {diagnostics.log_history.length === 0 ? (
+              <p className="text-[13px] text-text-muted">
+                No deploy log history available for this range.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {diagnostics.log_history.map((e) => (
+                  <div
+                    key={e.id}
+                    className="flex items-center gap-2 text-[13px] font-mono text-text-secondary"
+                  >
+                    <RangeStatePill state={logHistoryPillState(e.status)} />
+                    <span>{e.start ? new Date(e.start).toLocaleString() : "-"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {diagnostics.latest_log_content && (
+            <div className="space-y-1">
+              <p className="text-[13px] uppercase tracking-wider text-text-secondary">
+                Latest log ({diagnostics.latest_log_status})
+              </p>
+              <LogViewer
+                content={diagnostics.latest_log_content}
+                filename={`range-${range?.rangeID}-latest-log.txt`}
+                maxHeight="max-h-80"
+              />
+            </div>
+          )}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Snapshots Tab
 // ---------------------------------------------------------------------------
 
 function SnapshotsTab({ server }: { server: string }) {
   const { toast } = useToast();
+  const orphanedIds = useOrphanedRanges(server);
   const [deployedRanges, setDeployedRanges] = useState<LudusRange[]>([]);
   const [selectedRange, setSelectedRange] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState<LudusSnapshot[]>([]);
@@ -475,9 +656,7 @@ function SnapshotsTab({ server }: { server: string }) {
     ludus
       .ranges(server)
       .then((rangesRes) => {
-        const realRanges = rangesRes.ranges.filter(
-          (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
-        );
+        const realRanges = rangesRes.ranges.filter((r) => isLiveRange(r, orphanedIds));
         setDeployedRanges(realRanges);
         if (realRanges.length > 0) {
           setSelectedRange(realRanges[0].rangeNumber);
@@ -485,7 +664,7 @@ function SnapshotsTab({ server }: { server: string }) {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [server]);
+  }, [server, orphanedIds]);
 
   const getSelectedRangeId = (): string => {
     if (selectedRange == null) return "";
@@ -1412,6 +1591,7 @@ function AssignRangeModal({
   onAssigned: () => void;
 }) {
   const { toast } = useToast();
+  const orphanedIds = useOrphanedRanges(server);
   const [ranges, setRanges] = useState<LudusRange[]>([]);
   const [selectedRangeId, setSelectedRangeId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1428,14 +1608,15 @@ function AssignRangeModal({
     ludus
       .ranges(server)
       .then((res) => {
-        setRanges(res.ranges);
-        if (res.ranges.length > 0) {
-          setSelectedRangeId(res.ranges[0].rangeID);
+        const realRanges = res.ranges.filter((r) => isLiveRange(r, orphanedIds));
+        setRanges(realRanges);
+        if (realRanges.length > 0) {
+          setSelectedRangeId(realRanges[0].rangeID);
         }
       })
       .catch(() => setRanges([]))
       .finally(() => setLoadingRanges(false));
-  }, [open, server]);
+  }, [open, server, orphanedIds]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -2187,6 +2368,7 @@ function AnsibleTab({ server }: { server: string }) {
 
 function TestingTab({ server }: { server: string }) {
   const { toast } = useToast();
+  const orphanedIds = useOrphanedRanges(server);
   const [ranges, setRanges] = useState<LudusRange[]>([]);
   const [selectedRangeNum, setSelectedRangeNum] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2198,9 +2380,7 @@ function TestingTab({ server }: { server: string }) {
     ludus
       .ranges(server)
       .then((res) => {
-        const realRanges = res.ranges.filter(
-          (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
-        );
+        const realRanges = res.ranges.filter((r) => isLiveRange(r, orphanedIds));
         setRanges(realRanges);
         if (realRanges.length > 0) {
           setSelectedRangeNum(realRanges[0].rangeNumber);
@@ -2208,7 +2388,7 @@ function TestingTab({ server }: { server: string }) {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [server]);
+  }, [server, orphanedIds]);
 
   const selectedRange = ranges.find((r) => r.rangeNumber === selectedRangeNum);
 
@@ -2344,6 +2524,7 @@ function TestingTab({ server }: { server: string }) {
 
 function LogsTab({ server }: { server: string }) {
   const { toast } = useToast();
+  const orphanedIds = useOrphanedRanges(server);
   const [ranges, setRanges] = useState<LudusRange[]>([]);
   const [selectedRangeNum, setSelectedRangeNum] = useState<number | null>(null);
   const [logContent, setLogContent] = useState("");
@@ -2355,9 +2536,7 @@ function LogsTab({ server }: { server: string }) {
     ludus
       .ranges(server)
       .then((rangesRes) => {
-        const realRanges = rangesRes.ranges.filter(
-          (r) => (r.numberOfVMs ?? 0) > 0 || (r.rangeState && r.rangeState !== "NEVER DEPLOYED"),
-        );
+        const realRanges = rangesRes.ranges.filter((r) => isLiveRange(r, orphanedIds));
         setRanges(realRanges);
         if (realRanges.length > 0) {
           setSelectedRangeNum(realRanges[0].rangeNumber);
@@ -2365,7 +2544,7 @@ function LogsTab({ server }: { server: string }) {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [server]);
+  }, [server, orphanedIds]);
 
   const fetchLogs = useCallback(() => {
     if (selectedRangeNum == null) return;

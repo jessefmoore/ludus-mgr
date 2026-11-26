@@ -60,6 +60,7 @@ def get_settings_view(
         admin_email=settings.admin_email,
         invite_token_ttl_hours=settings.invite_token_ttl_hours,
         public_base_url=settings.public_base_url,
+        proxmox_login_url=settings.resolved_proxmox_url if settings.ludus_auth_enabled else None,
     )
 
 
