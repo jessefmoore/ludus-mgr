@@ -70,7 +70,7 @@ def login(
                 # Random, unusable local password - this account authenticates
                 # via Ludus/Proxmox, not a stored password.
                 password_hash=hash_password(secrets.token_urlsafe(32)),
-                role="instructor",
+                role="lab manager",
             )
             db.add(user)
             db.commit()

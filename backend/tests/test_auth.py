@@ -101,7 +101,7 @@ def test_login_success_sets_cookie_and_returns_user(client: TestClient, admin_us
     body = resp.json()
     assert body["user"]["email"] == ADMIN_EMAIL
     assert body["user"]["id"] == admin_user.id
-    assert body["user"]["role"] == "instructor"
+    assert body["user"]["role"] == "lab manager"
     assert "password_hash" not in body["user"]
     set_cookie = resp.headers.get("set-cookie", "")
     assert f"{COOKIE_NAME}=" in set_cookie
@@ -147,7 +147,7 @@ def test_me_with_valid_cookie_returns_user(client: TestClient, admin_user: User)
     body = resp.json()
     assert body["id"] == admin_user.id
     assert body["email"] == ADMIN_EMAIL
-    assert body["role"] == "instructor"
+    assert body["role"] == "lab manager"
     assert "password_hash" not in body
 
 

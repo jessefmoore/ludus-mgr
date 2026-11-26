@@ -1,4 +1,4 @@
-"""User ORM model (instructor accounts)."""
+"""User ORM model (lab manager accounts)."""
 
 from datetime import UTC, datetime
 
@@ -9,14 +9,14 @@ from app.core.db import Base
 
 
 class User(Base):
-    """An instructor user of the platform."""
+    """A lab manager user of the platform."""
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(32), nullable=False, default="instructor")
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="lab manager")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

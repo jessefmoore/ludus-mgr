@@ -217,7 +217,7 @@ export default function Login() {
           <div>
             <h1 className="text-[28px] font-bold text-text-primary">Welcome back</h1>
             <p className="text-[15px] text-text-secondary mt-1">
-              Sign in to the instructor platform
+              Sign in to the lab manager platform
             </p>
           </div>
 
@@ -270,7 +270,7 @@ export default function Login() {
           />
 
           <p className="text-xs text-text-muted text-center">
-            Instructor access only - contact your admin for credentials
+            Lab manager access only - contact your admin for credentials
           </p>
         </div>
       </div>

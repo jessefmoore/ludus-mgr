@@ -1,6 +1,6 @@
 """Platform settings endpoints: view config, test Ludus, change password.
 
-All routes require an authenticated instructor session (cookie-based).
+All routes require an authenticated lab manager session (cookie-based).
 """
 
 from __future__ import annotations

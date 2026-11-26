@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    # Instructor admin bootstrap
+    # Lab manager admin bootstrap
     admin_email: str
     admin_password: str
 
@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # Proxmox credentials (validated via the Proxmox ticket API). Users log in
     # with their Ludus userID (or Proxmox username) + Proxmox password.
     ludus_auth_enabled: bool = True
-    # Only Ludus admin users may log into this instructor console. Set false to
+    # Only Ludus admin users may log into this lab manager console. Set false to
     # allow any valid Ludus user (e.g. students) - not recommended.
     ludus_auth_admins_only: bool = True
     # Proxmox base URL for the ticket check. If unset, derived from

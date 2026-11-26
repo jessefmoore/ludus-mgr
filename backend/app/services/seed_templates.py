@@ -3,7 +3,7 @@
 The YAML files in ``app/seed_templates/`` are curated, deployable Ludus v1
 range configs (from github.com/jessefmoore/Ludus-Ranges, with GOAD/``goad.sh``
 configs excluded). On first startup — tracked per ``SEED_VERSION`` via an
-``Event`` sentinel — they are imported as ``LabTemplate`` rows so instructors
+``Event`` sentinel — they are imported as ``LabTemplate`` rows so lab managers
 have ready-to-deploy templates in the UI.
 
 Idempotent and delete-respecting: once a version has been seeded, it is not

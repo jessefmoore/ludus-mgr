@@ -1,4 +1,4 @@
-"""Password hashing, JWT, and cookie helpers for single-instructor auth.
+"""Password hashing, JWT, and cookie helpers for single-lab-manager auth.
 
 Security design notes (Phase 1 MVP):
 
@@ -7,7 +7,7 @@ Security design notes (Phase 1 MVP):
   ``PUBLIC_BASE_URL`` uses HTTPS.
 * CSRF protection is intentionally out of scope for Phase 1. ``SameSite=Lax``
   blocks cross-origin POST/PUT/DELETE from third-party sites on modern
-  browsers, which is acceptable for an MVP with a single instructor user
+  browsers, which is acceptable for an MVP with a single lab manager user
   and a same-origin SPA. This MUST be revisited before shipping anything
   that accepts untrusted cross-site traffic: switch to ``SameSite=Strict``
   and add a CSRF token pattern (double-submit cookie or per-request

@@ -1,6 +1,6 @@
 """Training session endpoints: list, create, detail, delete.
 
-All routes require an authenticated instructor session (cookie-based).
+All routes require an authenticated lab manager session (cookie-based).
 
 No Ludus calls are issued from this module: provisioning lives in a
 dedicated router (task #21). Delete here is a pure DB operation and
@@ -228,7 +228,7 @@ def patch_session(
     * ``shared_range_id`` may only be (re)bound while the session is ``draft``
       (a non-null value is validated against Ludus).
     * ``cpu_quota`` / ``ram_quota_gb`` may be edited any time *except* after
-      the session has ``ended`` - so an instructor can raise/lower a running
+      the session has ``ended`` - so a lab manager can raise/lower a running
       cohort's budget before provisioning more students.
     """
     session_row = sessions_service.get_session(db, session_id)

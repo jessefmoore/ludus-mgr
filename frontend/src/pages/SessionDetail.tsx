@@ -334,7 +334,7 @@ export default function SessionDetail() {
     });
   };
 
-  // Instructor-side quick download of a student's WireGuard config (by Ludus
+  // Lab-manager-side quick download of a student's WireGuard config (by Ludus
   // userID), independent of whether the student has redeemed their invite.
   const handleDownloadWg = async (student: StudentRead) => {
     try {
@@ -397,7 +397,7 @@ export default function SessionDetail() {
       sortValue: (s) => (s.status === "ready" ? 2 : s.status === "error" ? 1 : 0),
       render: (s) => {
         // Config exists once a student is provisioned (ready) - offer a direct
-        // instructor download. Pending = not provisioned yet; error = failed.
+        // lab manager download. Pending = not provisioned yet; error = failed.
         if (s.status === "ready") {
           return (
             <button

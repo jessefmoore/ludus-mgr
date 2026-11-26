@@ -1,6 +1,6 @@
 """Lab template endpoints: list, create, detail, update, delete, cover image.
 
-All routes require an authenticated instructor session (cookie-based).
+All routes require an authenticated lab manager session (cookie-based).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status

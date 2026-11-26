@@ -57,7 +57,7 @@ def test_round_trip_insert_and_fetch(orm_session: OrmSession) -> None:
     user = User(
         email="instructor@example.com",
         password_hash="hashed",
-        role="instructor",
+        role="lab manager",
     )
     orm_session.add(user)
 
@@ -114,7 +114,7 @@ def test_round_trip_insert_and_fetch(orm_session: OrmSession) -> None:
     fetched_user = orm_session.execute(
         select(User).where(User.email == "instructor@example.com")
     ).scalar_one()
-    assert fetched_user.role == "instructor"
+    assert fetched_user.role == "lab manager"
     assert fetched_user.created_at is not None
 
     fetched_template = orm_session.execute(

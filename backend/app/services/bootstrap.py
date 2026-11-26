@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_admin_user(db: Session, settings: Settings) -> User:
-    """Guarantee exactly one instructor user is present, return it.
+    """Guarantee exactly one lab manager user is present, return it.
 
     Behaviour:
 
     * If no users exist, create one from ``settings.admin_email`` /
-      ``settings.admin_password`` with ``role="instructor"``.
+      ``settings.admin_password`` with ``role="lab manager"``.
     * If a user with ``admin_email`` already exists, return it. We do NOT
       reset the stored hash; if the env-supplied password no longer matches
       (rotated out-of-band) we log a warning and leave the DB untouched, so
@@ -53,7 +53,7 @@ def ensure_admin_user(db: Session, settings: Settings) -> User:
     admin = User(
         email=settings.admin_email,
         password_hash=hash_password(settings.admin_password),
-        role="instructor",
+        role="lab manager",
     )
     db.add(admin)
     db.commit()

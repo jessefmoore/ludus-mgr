@@ -1,6 +1,6 @@
 """Ludus discovery endpoints: list ranges, fetch range config.
 
-All routes require an authenticated instructor session (cookie-based).
+All routes require an authenticated lab manager session (cookie-based).
 These endpoints proxy to the Ludus API so the frontend can discover
 deployed ranges and optionally import their configs as lab templates.
 """

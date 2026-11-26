@@ -5,7 +5,7 @@ to:
 
 1. Apply database schema (Alembic in production, ``Base.metadata.create_all``
    as a dev/test convenience).
-2. Bootstrap the instructor admin user from ``ADMIN_EMAIL`` /
+2. Bootstrap the lab manager admin user from ``ADMIN_EMAIL`` /
    ``ADMIN_PASSWORD``.
 
 The module is import-safe: constructing the ``FastAPI`` instance does not

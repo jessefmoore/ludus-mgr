@@ -1,6 +1,6 @@
 """Authenticate app logins against Ludus users' Proxmox credentials.
 
-Ludus users are Proxmox (PAM) users. To let instructors log in with their
+Ludus users are Proxmox (PAM) users. To let lab managers log in with their
 Ludus/Proxmox credentials instead of a separate app password, this validates a
 submitted ``username`` + ``password`` by:
 
@@ -11,7 +11,7 @@ submitted ``username`` + ``password`` by:
      supplied password. A valid ticket means the password is correct.
 
 Policy: when ``ludus_auth_admins_only`` is set (default), only Ludus admins are
-allowed to authenticate (this is an instructor management console).
+allowed to authenticate (this is a lab manager management console).
 """
 
 from __future__ import annotations

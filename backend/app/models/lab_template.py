@@ -18,7 +18,7 @@ class LabTemplateMode(enum.StrEnum):
 
 
 class LabTemplate(Base):
-    """A reusable lab definition (Ludus range-config) an instructor can spin up."""
+    """A reusable lab definition (Ludus range-config) a lab manager can spin up."""
 
     __tablename__ = "lab_templates"
 

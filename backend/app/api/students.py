@@ -6,7 +6,7 @@ because they live under different base paths:
 * ``POST   /api/sessions/{session_id}/students``  -> enroll (no Ludus call)
 * ``DELETE /api/students/{student_id}``           -> remove + cleanup
 
-All routes require an authenticated instructor session (cookie-based).
+All routes require an authenticated lab manager session (cookie-based).
 Provisioning (calling ``user_add`` / ``range_deploy``) is a separate
 flow in task #21 - this router deliberately never provisions on add.
 """
