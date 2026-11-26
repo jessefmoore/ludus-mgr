@@ -140,6 +140,26 @@ See `.env.example` for the full list of Ludus variables.
 ### Credits
 This was forked from https://github.com/whiteov3rflow/ludus-helm and modified to work with Ludus version 2
 
+## Roadmap
+
+- **UW NetID SSO login** — add an option to log into ludus-mgr (instructor dashboard,
+  and/or the student invite flow) via University of Washington SSO instead of the
+  current single-admin JWT login. Notes for when this gets picked up:
+  - UW's generally-available protocol is **SAML 2.0** via their Shibboleth IdP, with
+    self-service SP registration ([Register a Service Provider with the UW](https://wiki.cac.washington.edu/display/infra/Register+a+Service+Provider+with+the+UW),
+    [Use SAML 2.0 for single sign-on](https://itconnect.uw.edu/tools-services-support/access-authentication/sso/saml/)).
+    UW's OIDC support is alpha/limited availability (requires emailing
+    iam-support@uw.edu), so SAML is the realistic path.
+  - This is **not** the same thing as [Ludus's own built-in SSO](https://docs.ludus.cloud/docs/administration/sso),
+    which is OAuth2-only (PocketBase-backed) and configured on the Ludus server itself
+    (`/opt/ludus/config.yml`) — UW doesn't offer a generally-available OAuth2 IdP, so
+    wiring UW SSO directly into Ludus isn't currently feasible. The practical
+    integration point is SAML login into ludus-mgr itself; Ludus API access stays on
+    the existing per-server API key.
+  - UW's default attribute release (NetID, etc.) requires the SP's entityID/ACS
+    endpoint to be on a `washington.edu`/`uw.edu` DNS name; otherwise non-default
+    attribute release needs UW-IT approval.
+
 ## License
 
 [MIT](LICENSE)
