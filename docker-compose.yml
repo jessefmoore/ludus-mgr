@@ -13,7 +13,7 @@ services:
       # Force production so the lifespan handler applies alembic migrations
       # rather than the dev-only Base.metadata.create_all fallback.
       APP_ENV: production
-      DATABASE_URL: postgresql://insec:${POSTGRES_PASSWORD:-insec-dev-password}@postgres:5432/insec
+      DATABASE_URL: postgresql+psycopg2://insec:${POSTGRES_PASSWORD:-insec-dev-password}@postgres:5432/insec
       CONFIG_STORAGE_DIR: /app/data/configs
     volumes:
       # WireGuard configs + any local storage.
