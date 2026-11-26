@@ -196,7 +196,7 @@ export default function SessionDetail() {
   if (loading || !session) {
     return (
       <>
-        <TopBar breadcrumbs={[{ label: "Sessions", to: "/" }, { label: "Loading..." }]} />
+        <TopBar breadcrumbs={[{ label: "Ranges", to: "/" }, { label: "Loading..." }]} />
         <div className="p-8 space-y-6">
           <TableSkeleton rows={5} cols={6} />
         </div>
@@ -222,7 +222,7 @@ export default function SessionDetail() {
 
   const handleDeleteSession = () => {
     setConfirmModal({
-      title: "Delete Session",
+      title: "Delete Range",
       message: `This will delete "${session.name}" and remove ${totalStudents} student(s). This cannot be undone.`,
       action: async () => {
         setDeleting(true);
@@ -230,7 +230,7 @@ export default function SessionDetail() {
           await sessions.delete(session.id);
           navigate("/", { replace: true });
         } catch (err) {
-          toast("error", err instanceof ApiError ? err.detail : "Failed to delete session");
+          toast("error", err instanceof ApiError ? err.detail : "Failed to delete range");
         } finally {
           setDeleting(false);
         }
@@ -240,7 +240,7 @@ export default function SessionDetail() {
 
   const handleRebuild = () => {
     setConfirmModal({
-      title: "Rebuild Session",
+      title: "Rebuild Range",
       message: `Destroy the VMs for "${session.name}", keeping the ${totalStudents} student user(s) and their VPN configs. Students return to "pending". Once the VMs are gone (a minute or two), click "Provision All" to redeploy fresh. Continue?`,
       action: async () => {
         try {
@@ -259,14 +259,14 @@ export default function SessionDetail() {
 
   const handleTeardown = () => {
     setConfirmModal({
-      title: "Tear Down Session",
+      title: "Tear Down Range",
       message: `Destroy all range VMs for "${session.name}" and mark it ended. The ${totalStudents} Ludus user(s) and their VPN configs are KEPT so their ranges can be redeployed later. Continue?`,
       action: async () => {
         try {
           const r = await sessions.teardown(session.id);
           toast(
             "success",
-            `Torn down: ${r.cleaned} range(s) destroyed${r.failed ? `, ${r.failed} failed` : ""}. Users kept, session ended.`,
+            `Torn down: ${r.cleaned} range(s) destroyed${r.failed ? `, ${r.failed} failed` : ""}. Users kept, range ended.`,
           );
           fetchSession();
         } catch (err) {
@@ -280,7 +280,7 @@ export default function SessionDetail() {
     const student = session.students.find((s) => s.id === studentId);
     setConfirmModal({
       title: "Remove Ludus User",
-      message: `Permanently delete Ludus user "${student?.ludus_userid ?? ""}" and destroy their range VMs, removing ${student?.full_name ?? "this student"} from the session. This frees the Ludus user slot and cannot be undone. Continue?`,
+      message: `Permanently delete Ludus user "${student?.ludus_userid ?? ""}" and destroy their range VMs, removing ${student?.full_name ?? "this student"} from the range. This frees the Ludus user slot and cannot be undone. Continue?`,
       action: async () => {
         try {
           await students.delete(studentId);
@@ -477,7 +477,7 @@ export default function SessionDetail() {
               <Button
                 variant="icon"
                 onClick={() => handleDeleteStudent(s.id)}
-                title="Remove student from the session"
+                title="Remove student from the range"
                 aria-label="Remove student"
               >
                 <Trash2 className="h-4 w-4" />
@@ -566,7 +566,7 @@ export default function SessionDetail() {
     <>
       <TopBar
         breadcrumbs={[
-          { label: "Sessions", to: "/" },
+          { label: "Ranges", to: "/" },
           { label: session.name },
         ]}
         actions={
@@ -582,7 +582,7 @@ export default function SessionDetail() {
                     quota && !quota.within_quota
                       ? quota.breaches.length > 0
                         ? `Blocked: ${quota.breaches.join("; ")}`
-                        : "Session demand exceeds its resource budget"
+                        : "Range demand exceeds its resource budget"
                       : undefined
                   }
                 >
@@ -598,7 +598,7 @@ export default function SessionDetail() {
                     Rebuild
                   </Button>
                 )}
-                <Button variant="danger" onClick={handleTeardown} title="Destroy VMs, remove Ludus users + configs, end the session">
+                <Button variant="danger" onClick={handleTeardown} title="Destroy VMs, remove Ludus users + configs, end the range">
                   Tear Down
                 </Button>
               </>
@@ -606,8 +606,8 @@ export default function SessionDetail() {
             <Button
               variant="icon"
               onClick={handleDeleteSession}
-              title="Delete session"
-              aria-label="Delete session"
+              title="Delete range"
+              aria-label="Delete range"
             >
               {deleting ? (
                 <span className="h-4 w-4 border-2 border-accent-danger/30 border-t-accent-danger rounded-full animate-spin" />
@@ -1081,7 +1081,7 @@ function QuotaEditor({
   return (
     <div className="space-y-3">
       <p className="text-[13px] text-text-muted">
-        Set the session's budget (blank = unlimited). Provisioning is blocked if allocation
+        Set the range's budget (blank = unlimited). Provisioning is blocked if allocation
         exceeds it.
       </p>
       <div className="grid grid-cols-2 gap-4">
@@ -1243,7 +1243,7 @@ function QuotaCard({
           {!quota.within_quota && (
             <div className="p-2.5 rounded-md bg-accent-danger/10 border border-accent-danger/30 text-[13px] text-accent-danger space-y-1">
               <p>
-                Provisioning is blocked — demand exceeds the session budget. Raise the quota,
+                Provisioning is blocked — demand exceeds the range budget. Raise the quota,
                 switch to shared mode, or reduce students.
               </p>
               {quota.breaches.length > 0 && (
@@ -1258,7 +1258,7 @@ function QuotaCard({
           {!hasBudget && (
             <p className="text-[13px] text-text-muted">
               No budget set — provisioning is unrestricted. Use “Set budget” to cap this
-              session's CPU/RAM.
+              range's CPU/RAM.
             </p>
           )}
         </>

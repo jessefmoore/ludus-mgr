@@ -124,7 +124,7 @@ export default function LabTemplates() {
             Lab Templates
           </h1>
           <p className="text-[15px] text-text-secondary mt-1">
-            Manage reusable lab configurations for your training sessions
+            Manage reusable lab configurations for your training ranges
           </p>
         </div>
 

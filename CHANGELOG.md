@@ -66,6 +66,17 @@ start a fresh `[Unreleased]` block.
   "what happens when everyone starts using their VMs at once" independent
   of current load.
 
+### Changed
+- **"Session" renamed to "Range" throughout the GUI** - Dashboard heading,
+  stat cards, "New Session"/"Create Session" buttons, breadcrumbs, delete/
+  rebuild/teardown dialog titles, and related toasts/tooltips now say
+  "Range" - a session can still fan out to multiple actual Ludus ranges in
+  dedicated mode, so a few sentences were reworded (not just find/replaced)
+  to avoid reading as "this range's range(s)". Display text only - the
+  underlying `Session` model, `/api/sessions` routes, and DB table are
+  unchanged; see the Roadmap for the larger rename this would need to be
+  more than cosmetic.
+
 ## [1.0.0] - 2026-04-21
 
 First major release. Full-stack platform with instructor dashboard, Ludus

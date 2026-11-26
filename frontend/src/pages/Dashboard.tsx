@@ -67,7 +67,7 @@ export default function Dashboard() {
       setDeleteTarget(null);
       fetchData();
     } catch (err) {
-      toast("error", err instanceof ApiError ? err.detail : "Failed to delete session");
+      toast("error", err instanceof ApiError ? err.detail : "Failed to delete range");
     } finally {
       setDeleting(false);
     }
@@ -155,8 +155,8 @@ export default function Dashboard() {
         <div className="flex justify-end">
           <Button
             variant="icon"
-            title="Delete session"
-            aria-label="Delete session"
+            title="Delete range"
+            aria-label="Delete range"
             onClick={(e) => {
               e.stopPropagation(); // don't trigger the row's navigate
               openDelete(s);
@@ -197,7 +197,7 @@ export default function Dashboard() {
     trend?: { delta: number; direction: "up" | "down" | "flat" };
   }[] = [
     {
-      label: "Active Sessions",
+      label: "Active Ranges",
       value: count("active"),
       icon: PlayCircle,
       accent: "text-accent-success",
@@ -210,7 +210,7 @@ export default function Dashboard() {
       accent: "text-text-secondary",
     },
     {
-      label: "Total Sessions",
+      label: "Total Ranges",
       value: sessionList.length,
       icon: CalendarRange,
       accent: "text-accent-info",
@@ -240,16 +240,16 @@ export default function Dashboard() {
             icon={<Plus />}
             onClick={() => setShowCreate(true)}
           >
-            New Session
+            New Range
           </Button>
         }
       />
 
       <PageTransition className="p-4 md:p-8 space-y-6">
         <div>
-          <h1 className="text-2xl md:text-[32px] leading-tight font-bold text-text-primary">Sessions</h1>
+          <h1 className="text-2xl md:text-[32px] leading-tight font-bold text-text-primary">Ranges</h1>
           <p className="text-[15px] text-text-secondary mt-1">
-            Manage your training sessions and student deployments
+            Manage your training ranges and student deployments
           </p>
         </div>
 
@@ -258,7 +258,7 @@ export default function Dashboard() {
             <div>
               <p className="text-[15px] font-medium text-text-primary">No lab templates yet</p>
               <p className="text-sm text-text-secondary mt-1">
-                Create a lab template before starting a training session.
+                Create a lab template before starting a training range.
               </p>
             </div>
             <Button variant="secondary" icon={<Layers />} onClick={() => navigate("/labs")}>
@@ -301,7 +301,7 @@ export default function Dashboard() {
         {/* Host capacity */}
         {capacity && <HostCapacityCard capacity={capacity} />}
 
-        {/* Sessions table */}
+        {/* Ranges table */}
         <Card variant="gradient" className="p-0 overflow-hidden">
           <div className="h-1 bg-gradient-to-r from-accent-success via-accent-info/60 to-transparent" />
           <div className="px-5 py-4 border-b border-border">
@@ -316,16 +316,16 @@ export default function Dashboard() {
             ) : sessionList.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16">
                 <CalendarRange className="h-12 w-12 text-text-muted mb-4" />
-                <p className="text-text-secondary mb-1">No sessions yet</p>
+                <p className="text-text-secondary mb-1">No ranges yet</p>
                 <p className="text-sm text-text-muted mb-6">
-                  Create your first training session
+                  Create your first training range
                 </p>
                 <Button
                   variant="primary"
                   icon={<Plus />}
                   onClick={() => setShowCreate(true)}
                 >
-                  New Session
+                  New Range
                 </Button>
               </div>
             ) : (
@@ -334,7 +334,7 @@ export default function Dashboard() {
                 data={sessionList}
                 keyExtractor={(s) => s.id}
                 searchable
-                searchPlaceholder="Search sessions..."
+                searchPlaceholder="Search ranges..."
                 searchFilter={(s, q) => s.name.toLowerCase().includes(q)}
                 onRowClick={(s) => navigate(`/sessions/${s.id}`)}
                 pageSize={10}
@@ -357,13 +357,13 @@ export default function Dashboard() {
       <Modal
         open={!!deleteTarget}
         onClose={() => !deleting && setDeleteTarget(null)}
-        title="Delete Session"
+        title="Delete Range"
         size="sm"
       >
         <p className="text-[15px] text-text-secondary mb-4">
           Delete <span className="font-medium text-text-primary">{deleteTarget?.name}</span>?
-          This removes the session from the manager. By default a session with live
-          (deployed) ranges can't be deleted — unless you choose to destroy its VMs below.
+          This removes the range from the manager. By default a range that still has
+          deployed VMs can't be deleted — unless you choose to destroy them below.
         </p>
         <label className="flex items-start gap-2.5 mb-6 cursor-pointer rounded-md border border-border p-3 hover:bg-bg-elevated">
           <input
@@ -375,7 +375,7 @@ export default function Dashboard() {
           <span className="text-[13px]">
             <span className="font-medium text-accent-danger">Also destroy all VMs</span>{" "}
             <span className="text-text-secondary">
-              in this session's range(s). The Ludus users are kept (so their ranges can be
+              for this range. The Ludus users are kept (so their ranges can be
               reused). Permanently deletes running machines — cannot be undone.
             </span>
           </span>
@@ -661,7 +661,7 @@ function CreateSessionModal({
       onCreated();
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.detail : "Failed to create session",
+        err instanceof ApiError ? err.detail : "Failed to create range",
       );
     } finally {
       setSaving(false);
@@ -669,7 +669,7 @@ function CreateSessionModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="New Session">
+    <Modal open={open} onClose={onClose} title="New Range">
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
           <div className="p-3 rounded-md bg-accent-danger/10 border border-accent-danger/30 text-[15px] text-accent-danger">
@@ -678,7 +678,7 @@ function CreateSessionModal({
         )}
 
         <Input
-          label="Session Name"
+          label="Range Name"
           placeholder="e.g. AD Attacks Workshop - April 2026"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -773,7 +773,7 @@ function CreateSessionModal({
                 <p className="mt-1 text-xs text-text-muted">
                   When auto-creating the shared range, deploy it under this exact Ludus
                   user (1-20 letters/numbers) — e.g. to reuse a userID from a torn-down
-                  session. They're enrolled as the range owner; others you add share it.
+                  range. They're enrolled as the range owner; others you add share it.
                 </p>
               </div>
             )}
@@ -834,7 +834,7 @@ function CreateSessionModal({
             />
           </div>
           <p className="text-[13px] text-text-muted">
-            Provisioning is blocked if the session's total demand exceeds this budget.
+            Provisioning is blocked if the range's total demand exceeds this budget.
             {mode === "dedicated"
               ? " Dedicated mode counts one range per student."
               : " Shared mode counts a single range regardless of headcount."}
@@ -846,7 +846,7 @@ function CreateSessionModal({
             Cancel
           </Button>
           <Button type="submit" variant="primary" loading={saving} disabled={labTemplates.length === 0}>
-            Create Session
+            Create Range
           </Button>
         </div>
       </form>

@@ -214,6 +214,14 @@ This was forked from https://github.com/whiteov3rflow/ludus-helm and modified to
     endpoint to be on a `washington.edu`/`uw.edu` DNS name; otherwise non-default
     attribute release needs UW-IT approval.
 
+- **"Session" → "Range" rename, the rest of the way** - the GUI now says
+  "Range" everywhere a lab manager sees it, but underneath it's still the
+  `Session` model, `sessions` DB table, and `/api/sessions` routes. Renaming
+  those too is a separate, larger project (touches migrations, every
+  backend module that imports `Session`, and the frontend's `sessions` API
+  client) - worth doing for consistency, but not bundled into the display
+  text change.
+
 ## License
 
 [MIT](LICENSE)

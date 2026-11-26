@@ -128,7 +128,7 @@ export default function CommandPalette() {
             icon: CalendarRange,
             label: session.name,
             description: session.status,
-            group: "Sessions",
+            group: "Ranges",
             action: () => navigate(`/sessions/${session.id}`),
           });
         }
