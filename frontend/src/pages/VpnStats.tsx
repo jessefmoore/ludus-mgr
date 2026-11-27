@@ -1,15 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Wifi, WifiOff, Users, RefreshCw, AlertTriangle } from "lucide-react";
+import { Wifi, WifiOff, Users, LogIn, Download, RefreshCw, AlertTriangle } from "lucide-react";
 import { vpn, ApiError } from "@/api";
-import type { VpnUserStatus } from "@/api";
+import type { VpnUserStatus, VpnSummary } from "@/api";
 import TopBar from "@/components/TopBar";
 import Card from "@/components/Card";
+import Button from "@/components/Button";
 import DataTable, { type Column } from "@/components/DataTable";
 import { TableSkeleton } from "@/components/Skeleton";
 import PageTransition from "@/components/PageTransition";
+import { useToast } from "@/components/Toast";
 
 const POLL_MS = 30000;
+
+const EMPTY_SUMMARY: VpnSummary = {
+  total_users: 0,
+  online_now: 0,
+  total_logins: 0,
+  most_active_userid: null,
+  most_active_logins: 0,
+};
 
 // Compact "time since" label for a VPN last-seen timestamp (e.g. "3m ago").
 function formatLastSeen(iso: string | null): string {
@@ -25,10 +35,12 @@ function formatLastSeen(iso: string | null): string {
 
 export default function VpnStats() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [users, setUsers] = useState<VpnUserStatus[]>([]);
-  const [online, setOnline] = useState(0);
+  const [summary, setSummary] = useState<VpnSummary>(EMPTY_SUMMARY);
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -37,7 +49,7 @@ export default function VpnStats() {
       const r = await vpn.overview();
       setEnabled(r.enabled);
       setUsers(r.users);
-      setOnline(r.online);
+      setSummary(r.summary ?? EMPTY_SUMMARY);
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Failed to read VPN status");
@@ -60,6 +72,25 @@ export default function VpnStats() {
       if (timer.current) clearTimeout(timer.current);
     };
   }, [load]);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await vpn.report();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `vpn-activity-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast("error", err instanceof ApiError ? err.detail : "PDF export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const columns: Column<VpnUserStatus>[] = [
     {
@@ -122,6 +153,13 @@ export default function VpnStats() {
       ),
     },
     {
+      key: "logins",
+      label: "Logins",
+      sortable: true,
+      sortValue: (u) => u.login_count,
+      render: (u) => <span className="text-[15px] text-text-primary">{u.login_count}</span>,
+    },
+    {
       key: "last_seen",
       label: "Last Seen",
       sortable: true,
@@ -137,16 +175,31 @@ export default function VpnStats() {
     },
   ];
 
-  const offline = users.length - online;
+  const offline = Math.max(0, summary.total_users - summary.online_now);
   const stats = [
-    { label: "Online", value: online, icon: Wifi, accent: "text-accent-success" },
-    { label: "Offline", value: offline < 0 ? 0 : offline, icon: WifiOff, accent: "text-text-muted" },
-    { label: "Provisioned Users", value: users.length, icon: Users, accent: "text-accent-info" },
+    { label: "Online", value: summary.online_now, icon: Wifi, accent: "text-accent-success" },
+    { label: "Offline", value: offline, icon: WifiOff, accent: "text-text-muted" },
+    { label: "Provisioned Users", value: summary.total_users, icon: Users, accent: "text-accent-info" },
+    { label: "Total Logins", value: summary.total_logins, icon: LogIn, accent: "text-accent-warning" },
   ];
 
   return (
     <>
-      <TopBar breadcrumbs={[{ label: "VPN Activity" }]} />
+      <TopBar
+        breadcrumbs={[{ label: "VPN Activity" }]}
+        actions={
+          enabled && !error ? (
+            <Button
+              variant="secondary"
+              icon={<Download />}
+              onClick={handleExport}
+              disabled={exporting || users.length === 0}
+            >
+              {exporting ? "Exporting..." : "Export PDF"}
+            </Button>
+          ) : undefined
+        }
+      />
 
       <PageTransition className="p-4 md:p-8 space-y-6">
         <div>
@@ -154,7 +207,7 @@ export default function VpnStats() {
             VPN Activity
           </h1>
           <p className="text-[15px] text-text-secondary mt-1">
-            Live WireGuard connection status for every provisioned user
+            Live WireGuard connection status and login history for every provisioned user
           </p>
         </div>
 
@@ -187,7 +240,7 @@ export default function VpnStats() {
         )}
 
         {enabled && !error && (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {stats.map((s) => (
               <Card key={s.label} variant="stat" className="flex items-start justify-between">
                 <div>
@@ -203,7 +256,7 @@ export default function VpnStats() {
         )}
 
         {loading ? (
-          <TableSkeleton rows={6} cols={6} />
+          <TableSkeleton rows={6} cols={7} />
         ) : enabled && !error ? (
           <DataTable
             columns={columns}

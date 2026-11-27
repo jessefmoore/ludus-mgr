@@ -192,12 +192,20 @@ export interface VpnUserStatus {
   session_name: string;
   online: boolean;
   last_seen: string | null;
+  login_count: number;
+}
+
+export interface VpnSummary {
+  total_users: number;
+  online_now: number;
+  total_logins: number;
+  most_active_userid: string | null;
+  most_active_logins: number;
 }
 
 export interface VpnOverviewResponse {
   enabled: boolean;
-  online: number;
-  total: number;
+  summary: VpnSummary;
   users: VpnUserStatus[];
 }
 

@@ -730,4 +730,22 @@ export const events = {
 export const vpn = {
   overview: () =>
     request<VpnOverviewResponse>("/api/vpn/overview", { method: "POST" }),
+
+  // Downloads the activity report as a PDF blob (server-rendered).
+  report: async () => {
+    const res = await fetch("/api/vpn/report.pdf", {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        detail = (await res.json()).detail ?? detail;
+      } catch {
+        // no JSON body
+      }
+      throw new ApiError(res.status, detail);
+    }
+    return res.blob();
+  },
 };

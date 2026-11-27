@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.sessions import router as sessions_router
+from app.api.vpn import router as vpn_router
 from app.core.config import Settings, get_settings
 from app.core.db import Base, get_db
 from app.core.deps import get_current_user, get_ludus_client_registry
@@ -148,6 +149,7 @@ def app_factory(
     def _build(authenticated: bool = True) -> FastAPI:
         app = FastAPI()
         app.include_router(sessions_router)
+        app.include_router(vpn_router)
 
         def _override_get_db() -> Iterator[OrmSession]:
             yield db_session
@@ -552,3 +554,72 @@ def test_vpn_status_enabled_reports_online_and_logs_login(
         select(Event).where(Event.action == "student.vpn_connected")
     ).scalar_one()
     assert event.student_id == student.id
+
+
+# -- VPN overview + PDF report ----------------------------------------------
+
+
+def _enable_vpn(settings, monkeypatch) -> None:
+    settings.vpn_tracking_enabled = True
+    monkeypatch.setattr("app.api.vpn.vpn_service.WireGuardMonitor", _FakeMonitor)
+
+
+def test_vpn_overview_disabled_by_default(client) -> None:
+    resp = client.post("/api/vpn/overview")
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+
+
+def test_vpn_overview_counts_logins_and_summary(
+    client, db_session, lab_template, settings, monkeypatch
+) -> None:
+    _enable_vpn(settings, monkeypatch)
+    row = _create_session_row(db_session, lab_template, status=SessionStatus.active)
+    student = _create_student_row(
+        db_session, row, ludus_userid="alice", invite_token="t" * 32,
+        status=StudentStatus.ready,
+    )
+    student.vpn_ip = "198.51.100.50"
+    db_session.commit()
+
+    resp = client.post("/api/vpn/overview")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["enabled"] is True
+    assert len(body["users"]) == 1
+    user = body["users"][0]
+    assert user["ludus_userid"] == "alice"
+    assert user["online"] is True
+    assert user["login_count"] == 1  # one offline->online transition logged
+    summary = body["summary"]
+    assert summary["total_users"] == 1
+    assert summary["online_now"] == 1
+    assert summary["total_logins"] == 1
+    assert summary["most_active_userid"] == "alice"
+    assert summary["most_active_logins"] == 1
+
+
+def test_vpn_report_pdf_download(
+    client, db_session, lab_template, settings, monkeypatch
+) -> None:
+    _enable_vpn(settings, monkeypatch)
+    row = _create_session_row(db_session, lab_template, status=SessionStatus.active)
+    student = _create_student_row(
+        db_session, row, ludus_userid="alice", invite_token="t" * 32,
+        status=StudentStatus.ready,
+    )
+    student.vpn_ip = "198.51.100.50"
+    db_session.commit()
+
+    resp = client.post("/api/vpn/report.pdf")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.headers["content-disposition"].startswith("attachment;")
+    assert resp.content[:5] == b"%PDF-"
+
+
+def test_vpn_report_pdf_disabled_returns_409(client) -> None:
+    resp = client.post("/api/vpn/report.pdf")
+    assert resp.status_code == 409
