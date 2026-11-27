@@ -39,6 +39,7 @@ from app.api import (
     ludus_testing,
     sessions,
     students,
+    vpn,
 )
 from app.api import settings as settings_api
 from app.core.config import Settings, get_settings
@@ -134,6 +135,7 @@ app.include_router(sessions.router)
 app.include_router(students.router)
 app.include_router(events.router)
 app.include_router(invite.router)
+app.include_router(vpn.router)
 
 
 @app.get("/health")

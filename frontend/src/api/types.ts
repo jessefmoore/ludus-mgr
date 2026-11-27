@@ -164,8 +164,41 @@ export interface StudentRead {
   range_id: string | null;
   status: StudentStatus;
   invite_redeemed_at: string | null;
+  vpn_last_seen: string | null;
   created_at: string;
   invite_url: string;
+}
+
+// VPN (WireGuard) login tracking
+export interface VpnStudentStatus {
+  id: number;
+  online: boolean;
+  last_seen: string | null;
+}
+
+export interface VpnStatusResponse {
+  enabled: boolean;
+  online: number;
+  students: VpnStudentStatus[];
+}
+
+export interface VpnUserStatus {
+  student_id: number;
+  full_name: string;
+  email: string;
+  ludus_userid: string;
+  range_id: string | null;
+  session_id: number;
+  session_name: string;
+  online: boolean;
+  last_seen: string | null;
+}
+
+export interface VpnOverviewResponse {
+  enabled: boolean;
+  online: number;
+  total: number;
+  users: VpnUserStatus[];
 }
 
 export interface StudentResetRequest {

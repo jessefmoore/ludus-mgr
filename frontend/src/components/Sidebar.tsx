@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Layers,
   Server,
+  Wifi,
   Settings,
   LogOut,
   Menu,
@@ -19,6 +20,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/labs", icon: Layers, label: "Lab Templates" },
   { to: "/ludus", icon: Server, label: "Ludus Management" },
+  { to: "/vpn", icon: Wifi, label: "VPN Activity" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 

@@ -27,6 +27,7 @@ import type {
   LabTemplateRead,
   StudentRead,
   EventRead,
+  VpnStudentStatus,
   LudusRange,
   LudusUser,
 } from "@/api";
@@ -41,6 +42,17 @@ import { TableSkeleton } from "@/components/Skeleton";
 import PageTransition from "@/components/PageTransition";
 import { useToast } from "@/components/Toast";
 import SessionTimeline from "@/components/SessionTimeline";
+
+// Compact "time since" label for a VPN last-seen timestamp (e.g. "3m ago").
+function formatLastSeen(iso: string): string {
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -62,6 +74,11 @@ export default function SessionDetail() {
   const [activityEvents, setActivityEvents] = useState<EventRead[]>([]);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityLoading, setActivityLoading] = useState(false);
+
+  // VPN (WireGuard) login tracking. `vpnEnabled` is driven by the backend
+  // setting; `vpnStatus` maps student id -> live connection state.
+  const [vpnEnabled, setVpnEnabled] = useState(false);
+  const [vpnStatus, setVpnStatus] = useState<Record<number, VpnStudentStatus>>({});
 
   // CSV import
   const [importing, setImporting] = useState(false);
@@ -181,6 +198,36 @@ export default function SessionDetail() {
       if (timer) clearTimeout(timer);
     };
   }, [id, session?.status, fetchSession]);
+
+  // Poll live VPN (WireGuard) connection state while the session is up. The
+  // reconciler also logs a student.vpn_connected event on each new login, so
+  // those appear in the activity panel. Stops/no-ops when tracking is disabled
+  // (the endpoint returns enabled=false) or the session isn't active.
+  useEffect(() => {
+    const s = sessionRef.current;
+    if (!s) return;
+    if (s.status !== "active" && s.status !== "provisioning") return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const r = await sessions.vpnStatus(Number(id));
+        if (stopped) return;
+        setVpnEnabled(r.enabled);
+        if (!r.enabled) return; // feature off - stop polling
+        setVpnStatus(Object.fromEntries(r.students.map((v) => [v.id, v])));
+      } catch {
+        /* transient - retry */
+      }
+      if (!stopped) timer = setTimeout(tick, 30000);
+    };
+    tick();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [id, session?.status]);
 
   // Fetch activity events when panel is opened
   useEffect(() => {
@@ -390,6 +437,31 @@ export default function SessionDetail() {
       sortValue: (s) => s.status,
       render: (s) => <StatusPill status={s.status} />,
     },
+    ...(vpnEnabled
+      ? [
+          {
+            key: "vpn_online",
+            label: "VPN",
+            sortable: true,
+            sortValue: (s: StudentRead) => (vpnStatus[s.id]?.online ? 1 : 0),
+            render: (s: StudentRead) => {
+              const v = vpnStatus[s.id];
+              const online = v?.online ?? false;
+              const lastSeen = v?.last_seen ?? s.vpn_last_seen;
+              return (
+                <div className="flex items-center gap-1.5" title={lastSeen ? `Last seen ${new Date(lastSeen).toLocaleString()}` : "Never connected"}>
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full ${online ? "bg-accent-success" : "bg-text-muted"}`}
+                  />
+                  <span className={`text-xs ${online ? "text-accent-success" : "text-text-muted"}`}>
+                    {online ? "Online" : lastSeen ? formatLastSeen(lastSeen) : "-"}
+                  </span>
+                </div>
+              );
+            },
+          } as Column<StudentRead>,
+        ]
+      : []),
     {
       key: "vpn",
       label: "WG Config",

@@ -191,6 +191,53 @@ to the node to report on (auto-detected otherwise). Currently only wired for
 the `default` Ludus server - other configured servers still use the
 manual-capacity fallback.
 
+### VPN login tracking (least-privilege host access)
+
+The **VPN Activity** page (and the per-range VPN column) shows which users are
+connected to their ranges over WireGuard, and logs each login to the activity
+feed. The Ludus API exposes no connection data, so ludus-mgr reads it straight
+from the host with one read-only command: `wg show <iface> dump`. It can run
+that locally (if the manager is co-located on the Ludus host) or over SSH.
+
+Disabled by default. To enable, set in `.env`:
+
+```bash
+VPN_TRACKING_ENABLED=true
+VPN_WG_INTERFACE=wg0
+VPN_WG_MODE=ssh            # or "local" if ludus-mgr runs ON the Ludus host
+VPN_SSH_HOST=<ludus-host>
+VPN_SSH_USER=vpnmon
+VPN_SSH_KEY_PATH=/app/data/vpnmon_ed25519   # key mounted into the backend container
+# VPN_ONLINE_WINDOW_SECONDS=180   # handshake newer than this = "online"
+# VPN_LOGIN_GAP_SECONDS=600       # a reconnect after this gap = a new login event
+```
+
+**Do not point this at a root SSH account.** A key in the container that can
+`ssh root@ludus` turns an app compromise into root on the Ludus host, when all
+we need is one read-only command. Instead, provision a locked-down `vpnmon`
+user with [`scripts/setup-vpnmon.sh`](scripts/setup-vpnmon.sh) **on the Ludus
+host**:
+
+```bash
+# 1. On the ludus-mgr box: generate a dedicated key pair for this.
+ssh-keygen -t ed25519 -f ./data/vpnmon_ed25519 -N "" -C "ludus-mgr-vpnmon"
+
+# 2. Copy the PUBLIC key to the Ludus host and run the setup there as root.
+sudo ./scripts/setup-vpnmon.sh --pubkey vpnmon_ed25519.pub --interface wg0
+```
+
+The script creates an unprivileged `vpnmon` user whose SSH key is pinned to a
+**forced command** (`wg show wg0 dump` and nothing else — no shell, no
+port-forwarding, no pty) and grants NOPASSWD sudo for exactly that one
+command. Even if the key leaks, it can only ever read WireGuard state. The
+private key stays under `./data` (mounted read-only into the backend as
+`/app/data`), so no code changes are needed — `VPN_WG_MODE=ssh` already runs
+precisely the command the host forces.
+
+For a no-SSH deployment you can instead run a read-only exporter (e.g.
+`prometheus-wireguard-exporter`) on the host and scrape it; that path needs a
+small additional monitor mode and is not wired up yet.
+
 ### Credits
 This was forked from https://github.com/whiteov3rflow/ludus-helm and modified to work with Ludus version 2
 

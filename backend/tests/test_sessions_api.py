@@ -6,6 +6,7 @@ gate inherited from ``get_current_user``.
 """
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
@@ -32,6 +33,7 @@ from app.models import (
 from app.models import (
     Session as SessionRow,
 )
+from app.services.vpn import PeerStat
 
 ADMIN_EMAIL = "instructor@example.com"
 ADMIN_PASSWORD = "super-secret-test-pw"
@@ -499,3 +501,54 @@ def test_create_session_writes_session_created_event(
     assert event.details_json["session_id"] == created_id
     assert event.details_json["name"] == "Audited Cohort"
     assert event.details_json["mode"] == "shared"
+
+
+# -- VPN status endpoint ----------------------------------------------------
+
+
+class _FakeMonitor:
+    """Stand-in for WireGuardMonitor: one online peer at 198.51.100.50."""
+
+    def __init__(self, _settings: Settings) -> None:
+        pass
+
+    def snapshot(self) -> dict[str, PeerStat]:
+        return {
+            "198.51.100.50": PeerStat(
+                "key", "203.0.113.5:51820", int(datetime.now(UTC).timestamp())
+            )
+        }
+
+
+def test_vpn_status_disabled_by_default(client, db_session, lab_template) -> None:
+    row = _create_session_row(db_session, lab_template, status=SessionStatus.active)
+    resp = client.post(f"/api/sessions/{row.id}/vpn-status")
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": False, "online": 0, "students": []}
+
+
+def test_vpn_status_enabled_reports_online_and_logs_login(
+    client, db_session, lab_template, settings, monkeypatch
+) -> None:
+    settings.vpn_tracking_enabled = True
+    monkeypatch.setattr("app.api.sessions.vpn_service.WireGuardMonitor", _FakeMonitor)
+    row = _create_session_row(db_session, lab_template, status=SessionStatus.active)
+    student = _create_student_row(
+        db_session, row, ludus_userid="alice", invite_token="t" * 32,
+        status=StudentStatus.ready,
+    )
+    student.vpn_ip = "198.51.100.50"
+    db_session.commit()
+
+    resp = client.post(f"/api/sessions/{row.id}/vpn-status")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["enabled"] is True
+    assert body["online"] == 1
+    assert body["students"][0]["id"] == student.id
+    assert body["students"][0]["online"] is True
+    event = db_session.execute(
+        select(Event).where(Event.action == "student.vpn_connected")
+    ).scalar_one()
+    assert event.student_id == student.id

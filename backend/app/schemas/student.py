@@ -80,6 +80,7 @@ class StudentRead(BaseModel):
     range_id: str | None = None
     status: StudentStatus
     invite_redeemed_at: datetime | None = None
+    vpn_last_seen: datetime | None = None
     created_at: datetime
     invite_url: str
 

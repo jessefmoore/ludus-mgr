@@ -8,6 +8,8 @@ therefore refuses to run while a session is ``active`` / ``provisioning``
 or has any ``ready`` students attached.
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
@@ -37,6 +39,7 @@ from app.services import provision as provision_service
 from app.services import sessions as sessions_service
 from app.services import snapshots as snapshots_service
 from app.services import teardown as teardown_service
+from app.services import vpn as vpn_service
 from app.services.exceptions import LudusError
 from app.services.resources import compute_range_resources, compute_session_demand
 
@@ -489,6 +492,65 @@ def deploy_status(
         failed=result.failed,
         done=result.done,
         students=[_student_to_read(s, settings) for s in result.students],
+    )
+
+
+class VpnStudentStatus(BaseModel):
+    """Per-student VPN liveness."""
+
+    id: int
+    online: bool
+    last_seen: datetime | None = None
+
+
+class VpnStatusResponse(BaseModel):
+    """Response body for ``POST /{id}/vpn-status``.
+
+    ``enabled`` is False (and ``students`` empty) when VPN tracking is turned
+    off in settings, so the UI can hide the indicators without erroring.
+    """
+
+    enabled: bool
+    online: int = 0
+    students: list[VpnStudentStatus] = []
+
+
+@router.post("/{session_id}/vpn-status", response_model=VpnStatusResponse)
+def vpn_status(
+    session_id: int,
+    db: DBSession = Depends(get_db),  # noqa: B008 -- FastAPI idiom
+    settings: Settings = Depends(get_settings),  # noqa: B008 -- FastAPI idiom
+    _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
+) -> VpnStatusResponse:
+    """Report which of a session's students are connected over the VPN.
+
+    Reads live WireGuard peer state from the Ludus host (``wg show``) and logs
+    a ``student.vpn_connected`` event on each new login. Polled by the UI while
+    a session is open. Returns ``enabled=False`` when VPN tracking is disabled.
+    """
+    if not settings.vpn_tracking_enabled:
+        return VpnStatusResponse(enabled=False)
+
+    monitor = vpn_service.WireGuardMonitor(settings)
+    try:
+        result = vpn_service.reconcile_vpn_status(
+            db=db, session_id=session_id, monitor=monitor, settings=settings
+        )
+    except vpn_service.SessionNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        ) from exc
+    except vpn_service.VpnMonitorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"VPN read failed: {exc}"
+        ) from exc
+    return VpnStatusResponse(
+        enabled=True,
+        online=result.online,
+        students=[
+            VpnStudentStatus(id=s.student.id, online=s.online, last_seen=s.last_seen)
+            for s in result.students
+        ],
     )
 
 

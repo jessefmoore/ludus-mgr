@@ -121,6 +121,27 @@ class Settings(BaseSettings):
     # boot (once per seed version). Set false to start with no templates.
     seed_lab_templates: bool = True
 
+    # --- VPN (WireGuard) login tracking ---
+    # When enabled, the session view polls WireGuard peer state on the Ludus
+    # host to show which students are connected over the VPN and to log their
+    # logins. The Ludus API exposes no connection data, so this reads
+    # ``wg show <iface> dump`` directly (see app.services.vpn). Disabled by
+    # default; `wg show` requires root/CAP_NET_ADMIN on the host.
+    vpn_tracking_enabled: bool = False
+    vpn_wg_interface: str = "wg0"
+    # "local" -> run `wg show` as a subprocess (app co-located on the Ludus
+    # host); "ssh" -> run it over SSH to a remote host.
+    vpn_wg_mode: str = "local"
+    vpn_ssh_host: str | None = None
+    vpn_ssh_user: str | None = None
+    vpn_ssh_key_path: str | None = None
+    vpn_ssh_port: int = 22
+    # A peer is "online" if its last handshake is within this many seconds.
+    vpn_online_window_seconds: int = 180
+    # A fresh online observation this many seconds after the last one counts
+    # as a new login (emits a student.vpn_connected event).
+    vpn_login_gap_seconds: int = 600
+
     @cached_property
     def ludus_servers(self) -> dict[str, LudusServerConfig]:
         """Discover all configured Ludus servers from env vars.

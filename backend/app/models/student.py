@@ -42,6 +42,14 @@ class Student(Base):
     ludus_userid: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     range_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     wg_config_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # WireGuard VPN tracking. ``vpn_ip`` is the peer's VPN address (parsed from
+    # the client .conf) used to map a ``wg show`` peer back to this student;
+    # ``vpn_last_seen`` is the most recent handshake observed by a vpn-status
+    # poll. See app.services.vpn.
+    vpn_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    vpn_last_seen: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     invite_token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     invite_redeemed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

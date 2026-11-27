@@ -12,6 +12,8 @@ import type {
   SessionTeardownResponse,
   BaselineSnapshotResponse,
   DeployStatusResponse,
+  VpnStatusResponse,
+  VpnOverviewResponse,
   SessionQuotaRead,
   StudentCreate,
   StudentRead,
@@ -186,6 +188,12 @@ export const sessions = {
   deployStatus: (id: number) =>
     request<DeployStatusResponse>(
       `/api/sessions/${id}/deploy-status`,
+      { method: "POST" },
+    ),
+
+  vpnStatus: (id: number) =>
+    request<VpnStatusResponse>(
+      `/api/sessions/${id}/vpn-status`,
       { method: "POST" },
     ),
 
@@ -716,4 +724,10 @@ export const events = {
     const q = qs.toString();
     return request<EventRead[]>(`/api/events${q ? `?${q}` : ""}`);
   },
+};
+
+// VPN (WireGuard) login tracking
+export const vpn = {
+  overview: () =>
+    request<VpnOverviewResponse>("/api/vpn/overview", { method: "POST" }),
 };

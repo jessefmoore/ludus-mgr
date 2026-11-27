@@ -38,6 +38,7 @@ from app.models import Session as SessionRow
 from app.models.event import Event
 from app.services.exceptions import LudusError, LudusRangeExists, LudusUserExists
 from app.services.resources import compute_range_resources, compute_session_demand
+from app.services.vpn import parse_vpn_ip
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session as DBSession
@@ -684,6 +685,9 @@ def _provision_one(
     #    deploy-status poll flips it to ready (or error).
     student.wg_config_path = str(cfg_path)
     student.range_id = assigned_range_id
+    # Record the peer's VPN IP so vpn-status polls can map `wg show` peers
+    # back to this student (see app.services.vpn).
+    student.vpn_ip = parse_vpn_ip(cfg_text)
 
     range_owner = (
         session_row.shared_range_id
