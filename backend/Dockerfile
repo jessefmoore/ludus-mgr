@@ -47,6 +47,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PATH="/usr/local/bin:${PATH}"
 
+# openssh-client: VPN login tracking in ssh mode shells out to
+# `ssh ... wg show <iface> dump` on the Ludus host (see app/services/vpn.py).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssh-client \
+ && rm -rf /var/lib/apt/lists/*
+
 # Non-root runtime user. Use fixed UID/GID 1000 so bind-mounted host dirs
 # (e.g. ./data) owned by the typical developer uid are writable without a
 # host-side chown dance. Override with build args if your host uses a

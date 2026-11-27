@@ -137,9 +137,23 @@ class WireGuardMonitor:
             if not self._ssh_host:
                 raise VpnMonitorError("vpn_wg_mode=ssh but VPN_SSH_HOST is unset")
             target = f"{self._ssh_user}@{self._ssh_host}" if self._ssh_user else self._ssh_host
-            cmd = ["ssh", "-p", str(self._ssh_port), "-o", "BatchMode=yes"]
+            cmd = [
+                "ssh",
+                "-p", str(self._ssh_port),
+                "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=10",
+                # TOFU: trust the lab host on first contact, pin it thereafter.
+                "-o", "StrictHostKeyChecking=accept-new",
+            ]
             if self._ssh_key_path:
-                cmd += ["-i", self._ssh_key_path]
+                # Use only this key (never an agent), and keep its known_hosts
+                # beside it so host pinning survives container restarts.
+                known = Path(self._ssh_key_path).with_name(".vpn_known_hosts")
+                cmd += [
+                    "-i", self._ssh_key_path,
+                    "-o", "IdentitiesOnly=yes",
+                    "-o", f"UserKnownHostsFile={known}",
+                ]
             cmd += [target, wg_cmd]
             return cmd
         # local

@@ -142,6 +142,37 @@ def test_parse_vpn_ip_missing() -> None:
     assert vpn_service.parse_vpn_ip("[Interface]\nPrivateKey = abc\n") is None
 
 
+def test_ssh_command_hardening() -> None:
+    s = Settings(
+        app_secret_key="x", admin_email="a@b.c", admin_password="p",
+        ludus_default_url="https://x", ludus_default_api_key="k",
+        vpn_wg_mode="ssh", vpn_wg_interface="wg0",
+        vpn_ssh_host="10.0.0.5", vpn_ssh_user="vpnmon",
+        vpn_ssh_key_path="/app/data/vpnmon_ed25519", vpn_ssh_port=2222,
+        _env_file=None,
+    )
+    cmd = vpn_service.WireGuardMonitor(s)._command()
+    assert cmd[0] == "ssh"
+    assert "vpnmon@10.0.0.5" in cmd
+    assert cmd[-1] == "wg show wg0 dump"
+    assert "BatchMode=yes" in cmd and "StrictHostKeyChecking=accept-new" in cmd
+    assert "IdentitiesOnly=yes" in cmd
+    assert "/app/data/vpnmon_ed25519" in cmd
+    assert "UserKnownHostsFile=/app/data/.vpn_known_hosts" in cmd
+    assert "2222" in cmd
+
+
+def test_ssh_command_requires_host() -> None:
+    s = Settings(
+        app_secret_key="x", admin_email="a@b.c", admin_password="p",
+        ludus_default_url="https://x", ludus_default_api_key="k",
+        vpn_wg_mode="ssh", vpn_ssh_host=None,
+        _env_file=None,
+    )
+    with pytest.raises(vpn_service.VpnMonitorError):
+        vpn_service.WireGuardMonitor(s)._command()
+
+
 def test_parse_wg_dump() -> None:
     dump = (
         "PRIVKEY\tPUBKEY\t51820\toff\n"  # interface line, skipped
