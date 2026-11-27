@@ -19,6 +19,8 @@ trainings and workshops.
 - **One-click bulk provision**: creates Ludus users, assigns ranges, generates WireGuard configs
 - Share per-student **invite links** - students download their VPN config
 - **Live dashboard**: student status, range health, snapshot state
+- **VPN activity tracking**: live WireGuard connection status, per-user login
+  counts, date-range filtering, and PDF/CSV report export (see below)
 - Per-student **lab reset** (triggers Ludus snapshot revert)
 - **One-click teardown**: cleanup all Ludus users, configs, and artifacts
 - Full **Ludus management UI**: ranges, snapshots, users, groups, testing mode, Ansible roles
@@ -191,13 +193,25 @@ to the node to report on (auto-detected otherwise). Currently only wired for
 the `default` Ludus server - other configured servers still use the
 manual-capacity fallback.
 
-### VPN login tracking (least-privilege host access)
+### VPN activity tracking (least-privilege host access)
 
-The **VPN Activity** page (and the per-range VPN column) shows which users are
-connected to their ranges over WireGuard, and logs each login to the activity
-feed. The Ludus API exposes no connection data, so ludus-mgr reads it straight
-from the host with one read-only command: `wg show <iface> dump`. It can run
-that locally (if the manager is co-located on the Ludus host) or over SSH.
+The **VPN Activity** page shows who is connected to their ranges over
+WireGuard and summarises their usage:
+
+- **Live status** — a green/grey online indicator per user (also surfaced as a
+  column on each range's detail page), from the peer's latest handshake.
+- **Login counts** — every offline→online transition is written to the audit
+  feed as a `student.vpn_connected` event; the page shows a lifetime login
+  count per user plus a headline summary (users / online now / total logins /
+  most active).
+- **Date-range filter** — scope the login counts and summary to a window
+  (From/To pickers, or *Last 7 days* / *Last 30 days* / *All time* presets).
+- **Report export** — download the current view (honouring the selected
+  window) as **PDF** or **CSV**.
+
+The Ludus API exposes no connection data, so ludus-mgr reads it straight from
+the host with one read-only command: `wg show <iface> dump`. It can run that
+locally (if the manager is co-located on the Ludus host) or over SSH.
 
 Disabled by default. To enable, set in `.env`:
 
