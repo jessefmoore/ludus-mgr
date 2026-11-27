@@ -746,9 +746,9 @@ export const vpn = {
       method: "POST",
     }),
 
-  // Downloads the activity report as a PDF blob (server-rendered).
-  report: async (range?: VpnRange) => {
-    const res = await fetch(`/api/vpn/report.pdf${vpnRangeQuery(range)}`, {
+  // Downloads the activity report as a server-rendered blob (pdf | csv).
+  report: async (format: "pdf" | "csv", range?: VpnRange) => {
+    const res = await fetch(`/api/vpn/report.${format}${vpnRangeQuery(range)}`, {
       method: "POST",
       credentials: "include",
     });

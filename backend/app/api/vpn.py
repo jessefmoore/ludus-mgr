@@ -179,6 +179,41 @@ def _fmt_last_seen(dt: datetime | None) -> str:
     return dt.strftime("%Y-%m-%d %H:%M UTC") if dt else "Never"
 
 
+def _report_rows(data: VpnOverviewResponse) -> list[dict]:
+    """Flatten the overview users into formatted rows shared by PDF + CSV."""
+    return [
+        {
+            "ludus_userid": u.ludus_userid,
+            "full_name": u.full_name,
+            "email": u.email,
+            "range_id": u.range_id or "-",
+            "session_name": u.session_name,
+            "status": "Online" if u.online else "Offline",
+            "login_count": u.login_count,
+            "last_seen": _fmt_last_seen(u.last_seen),
+        }
+        for u in data.users
+    ]
+
+
+def _collect_for_report(
+    db: DBSession, settings: Settings, start: date | None, end: date | None
+) -> VpnOverviewResponse:
+    """Shared guard + collect for the report endpoints (PDF/CSV)."""
+    if not settings.vpn_tracking_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="VPN tracking is disabled; nothing to report.",
+        )
+    _validate_range(start, end)
+    try:
+        return _collect_overview(db, settings, start=start, end=end)
+    except vpn_service.VpnMonitorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"VPN read failed: {exc}"
+        ) from exc
+
+
 @router.post("/report.pdf")
 def vpn_report_pdf(
     start: date | None = Query(default=None),  # noqa: B008 -- FastAPI idiom
@@ -189,41 +224,38 @@ def vpn_report_pdf(
 ) -> Response:
     """Download the VPN activity overview as a PDF (login counts scoped to the
     optional [start, end] date range)."""
-    if not settings.vpn_tracking_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="VPN tracking is disabled; nothing to report.",
-        )
-    _validate_range(start, end)
-    try:
-        data = _collect_overview(db, settings, start=start, end=end)
-    except vpn_service.VpnMonitorError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"VPN read failed: {exc}"
-        ) from exc
-
+    data = _collect_for_report(db, settings, start, end)
     generated_at = datetime.now(UTC)
-    rows = [
-        {
-            "ludus_userid": u.ludus_userid,
-            "full_name": u.full_name,
-            "range_id": u.range_id or "-",
-            "session_name": u.session_name,
-            "status": "Online" if u.online else "Offline",
-            "login_count": u.login_count,
-            "last_seen": _fmt_last_seen(u.last_seen),
-        }
-        for u in data.users
-    ]
     pdf_bytes = vpn_report.render_overview_pdf(
         generated_at=generated_at,
         period=_period_label(start, end),
         summary=data.summary.model_dump(),
-        rows=rows,
+        rows=_report_rows(data),
     )
     filename = f"vpn-activity-{generated_at.strftime('%Y%m%d-%H%M%S')}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/report.csv")
+def vpn_report_csv(
+    start: date | None = Query(default=None),  # noqa: B008 -- FastAPI idiom
+    end: date | None = Query(default=None),  # noqa: B008 -- FastAPI idiom
+    db: DBSession = Depends(get_db),  # noqa: B008 -- FastAPI idiom
+    settings: Settings = Depends(get_settings),  # noqa: B008 -- FastAPI idiom
+    _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
+) -> Response:
+    """Download the VPN activity overview as CSV (login counts scoped to the
+    optional [start, end] date range)."""
+    data = _collect_for_report(db, settings, start, end)
+    generated_at = datetime.now(UTC)
+    csv_text = vpn_report.render_overview_csv(_report_rows(data))
+    filename = f"vpn-activity-{generated_at.strftime('%Y%m%d-%H%M%S')}.csv"
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

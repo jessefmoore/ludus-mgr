@@ -7,6 +7,8 @@ libraries, so it works in the slim runtime image.
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime
 
 from fpdf import FPDF
@@ -93,4 +95,27 @@ def render_overview_pdf(
     return bytes(pdf.output())
 
 
-__all__ = ["render_overview_pdf"]
+# CSV gets an extra Email column that the width-constrained PDF omits.
+_CSV_COLUMNS: list[tuple[str, str]] = [
+    ("User ID", "ludus_userid"),
+    ("Name", "full_name"),
+    ("Email", "email"),
+    ("Range", "range_id"),
+    ("Range Group", "session_name"),
+    ("Status", "status"),
+    ("Logins", "login_count"),
+    ("Last Seen", "last_seen"),
+]
+
+
+def render_overview_csv(rows: list[dict]) -> str:
+    """Render the per-user activity rows as CSV text (header + one row each)."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([header for header, _key in _CSV_COLUMNS])
+    for row in rows:
+        writer.writerow([row.get(key, "") for _header, key in _CSV_COLUMNS])
+    return buf.getvalue()
+
+
+__all__ = ["render_overview_csv", "render_overview_pdf"]

@@ -625,6 +625,34 @@ def test_vpn_report_pdf_disabled_returns_409(client) -> None:
     assert resp.status_code == 409
 
 
+def test_vpn_report_csv_download(
+    client, db_session, lab_template, settings, monkeypatch
+) -> None:
+    _enable_vpn(settings, monkeypatch)
+    row = _create_session_row(db_session, lab_template, status=SessionStatus.active)
+    student = _create_student_row(
+        db_session, row, ludus_userid="alice", invite_token="t" * 32,
+        status=StudentStatus.ready,
+    )
+    student.vpn_ip = "198.51.100.50"
+    db_session.commit()
+
+    resp = client.post("/api/vpn/report.csv")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert resp.headers["content-disposition"].endswith('.csv"')
+    lines = resp.text.strip().splitlines()
+    assert lines[0] == "User ID,Name,Email,Range,Range Group,Status,Logins,Last Seen"
+    assert lines[1].startswith("alice,")
+    assert ",Online," in lines[1]
+
+
+def test_vpn_report_csv_disabled_returns_409(client) -> None:
+    resp = client.post("/api/vpn/report.csv")
+    assert resp.status_code == 409
+
+
 class _OfflineMonitor:
     """Snapshot with no peers — every student reads as offline."""
 

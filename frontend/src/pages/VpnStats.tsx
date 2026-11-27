@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Wifi, WifiOff, Users, LogIn, Download, RefreshCw, AlertTriangle } from "lucide-react";
+import { Wifi, WifiOff, Users, LogIn, FileText, FileSpreadsheet, RefreshCw, AlertTriangle } from "lucide-react";
 import { vpn, ApiError } from "@/api";
 import type { VpnUserStatus, VpnSummary } from "@/api";
 import TopBar from "@/components/TopBar";
@@ -40,7 +40,7 @@ export default function VpnStats() {
   const [summary, setSummary] = useState<VpnSummary>(EMPTY_SUMMARY);
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<null | "pdf" | "csv">(null);
   const [error, setError] = useState<string | null>(null);
   // Date-range filter for login counts ("" = open bound). Empty/empty = all time.
   const [start, setStart] = useState("");
@@ -78,22 +78,25 @@ export default function VpnStats() {
     };
   }, [load]);
 
-  const handleExport = async () => {
-    setExporting(true);
+  const handleExport = async (format: "pdf" | "csv") => {
+    setExporting(format);
     try {
-      const blob = await vpn.report(range);
+      const blob = await vpn.report(format, range);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `vpn-activity-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.download = `vpn-activity-${new Date().toISOString().slice(0, 10)}.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast("error", err instanceof ApiError ? err.detail : "PDF export failed");
+      toast(
+        "error",
+        err instanceof ApiError ? err.detail : `${format.toUpperCase()} export failed`,
+      );
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   };
 
@@ -214,14 +217,24 @@ export default function VpnStats() {
         breadcrumbs={[{ label: "VPN Activity" }]}
         actions={
           enabled && !error ? (
-            <Button
-              variant="secondary"
-              icon={<Download />}
-              onClick={handleExport}
-              disabled={exporting || users.length === 0}
-            >
-              {exporting ? "Exporting..." : "Export PDF"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                icon={<FileSpreadsheet />}
+                onClick={() => handleExport("csv")}
+                disabled={exporting !== null || users.length === 0}
+              >
+                {exporting === "csv" ? "Exporting..." : "Export CSV"}
+              </Button>
+              <Button
+                variant="secondary"
+                icon={<FileText />}
+                onClick={() => handleExport("pdf")}
+                disabled={exporting !== null || users.length === 0}
+              >
+                {exporting === "pdf" ? "Exporting..." : "Export PDF"}
+              </Button>
+            </div>
           ) : undefined
         }
       />
