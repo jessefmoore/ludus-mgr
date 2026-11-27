@@ -727,13 +727,28 @@ export const events = {
 };
 
 // VPN (WireGuard) login tracking
+export interface VpnRange {
+  start?: string; // YYYY-MM-DD, inclusive
+  end?: string; // YYYY-MM-DD, inclusive
+}
+
+function vpnRangeQuery(range?: VpnRange): string {
+  const qs = new URLSearchParams();
+  if (range?.start) qs.set("start", range.start);
+  if (range?.end) qs.set("end", range.end);
+  const q = qs.toString();
+  return q ? `?${q}` : "";
+}
+
 export const vpn = {
-  overview: () =>
-    request<VpnOverviewResponse>("/api/vpn/overview", { method: "POST" }),
+  overview: (range?: VpnRange) =>
+    request<VpnOverviewResponse>(`/api/vpn/overview${vpnRangeQuery(range)}`, {
+      method: "POST",
+    }),
 
   // Downloads the activity report as a PDF blob (server-rendered).
-  report: async () => {
-    const res = await fetch("/api/vpn/report.pdf", {
+  report: async (range?: VpnRange) => {
+    const res = await fetch(`/api/vpn/report.pdf${vpnRangeQuery(range)}`, {
       method: "POST",
       credentials: "include",
     });

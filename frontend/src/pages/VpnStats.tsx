@@ -42,11 +42,16 @@ export default function VpnStats() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Date-range filter for login counts ("" = open bound). Empty/empty = all time.
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout>>();
+
+  const range = { start: start || undefined, end: end || undefined };
 
   const load = useCallback(async () => {
     try {
-      const r = await vpn.overview();
+      const r = await vpn.overview({ start: start || undefined, end: end || undefined });
       setEnabled(r.enabled);
       setUsers(r.users);
       setSummary(r.summary ?? EMPTY_SUMMARY);
@@ -56,7 +61,7 @@ export default function VpnStats() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [start, end]);
 
   // Poll on an interval while the page is open.
   useEffect(() => {
@@ -76,7 +81,7 @@ export default function VpnStats() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      const blob = await vpn.report();
+      const blob = await vpn.report(range);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -175,6 +180,26 @@ export default function VpnStats() {
     },
   ];
 
+  // Preset helpers: "all time" clears both bounds; "last N days" sets a window
+  // ending today.
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const applyAllTime = () => {
+    setStart("");
+    setEnd("");
+  };
+  const applyLastDays = (days: number) => {
+    const now = new Date();
+    const from = new Date(now);
+    from.setDate(now.getDate() - (days - 1));
+    setStart(iso(from));
+    setEnd(iso(now));
+  };
+
+  const inputCls =
+    "h-9 px-2 rounded-md bg-bg-elevated border border-border text-sm text-text-primary focus:outline-none focus:border-accent-success";
+  const presetCls =
+    "h-9 px-3 rounded-md border border-border text-sm text-text-secondary hover:text-text-primary hover:border-accent-success/50 transition-colors";
+
   const offline = Math.max(0, summary.total_users - summary.online_now);
   const stats = [
     { label: "Online", value: summary.online_now, icon: Wifi, accent: "text-accent-success" },
@@ -235,6 +260,47 @@ export default function VpnStats() {
                 Check that the backend can run <code className="font-mono">wg show</code> on the
                 Ludus host (SSH reachable, key valid, permission to read the interface).
               </p>
+            </div>
+          </Card>
+        )}
+
+        {enabled && !error && (
+          <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 p-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-medium uppercase tracking-wider text-text-secondary">
+                Login window
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-text-muted">From</label>
+              <input
+                type="date"
+                value={start}
+                max={end || undefined}
+                onChange={(e) => setStart(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-text-muted">To</label>
+              <input
+                type="date"
+                value={end}
+                min={start || undefined}
+                onChange={(e) => setEnd(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button className={presetCls} onClick={() => applyLastDays(7)}>
+                Last 7 days
+              </button>
+              <button className={presetCls} onClick={() => applyLastDays(30)}>
+                Last 30 days
+              </button>
+              <button className={presetCls} onClick={applyAllTime}>
+                All time
+              </button>
             </div>
           </Card>
         )}

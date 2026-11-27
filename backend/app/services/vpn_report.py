@@ -29,11 +29,13 @@ def render_overview_pdf(
     generated_at: datetime,
     summary: dict,
     rows: list[dict],
+    period: str = "All time",
 ) -> bytes:
     """Build the VPN activity report PDF and return its bytes.
 
     ``summary`` carries the headline counts; ``rows`` is one pre-formatted dict
-    per user with keys matching :data:`_COLUMNS`.
+    per user with keys matching :data:`_COLUMNS`; ``period`` labels the
+    login-count date range the report covers.
     """
     pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -46,7 +48,8 @@ def render_overview_pdf(
     pdf.set_text_color(110, 110, 110)
     pdf.cell(
         0, 6,
-        f"Generated {generated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Generated {generated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        f"    |    Login counts: {period}",
         new_x="LMARGIN", new_y="NEXT",
     )
     pdf.ln(3)

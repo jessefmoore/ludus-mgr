@@ -6,9 +6,9 @@ counts (from the audit-event history) and a headline summary. The same data
 is downloadable as a PDF. See app.services.vpn / app.services.vpn_report.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DBSession
@@ -64,25 +64,41 @@ class VpnOverviewResponse(BaseModel):
     users: list[VpnUserStatus] = []
 
 
-def _login_counts(db: DBSession) -> dict[int, int]:
-    """Lifetime ``student.vpn_connected`` count per student id."""
-    rows = db.execute(
-        select(Event.student_id, func.count())
-        .where(Event.action == _LOGIN_ACTION)
-        .group_by(Event.student_id)
-    ).all()
+def _login_counts(
+    db: DBSession, *, start: date | None = None, end: date | None = None
+) -> dict[int, int]:
+    """``student.vpn_connected`` count per student id, within [start, end].
+
+    ``start``/``end`` are calendar dates interpreted in UTC and inclusive of
+    the whole end day; either may be None for an open bound (None/None = all
+    time).
+    """
+    stmt = select(Event.student_id, func.count()).where(Event.action == _LOGIN_ACTION)
+    if start is not None:
+        stmt = stmt.where(Event.created_at >= datetime.combine(start, time.min, tzinfo=UTC))
+    if end is not None:
+        stmt = stmt.where(Event.created_at <= datetime.combine(end, time.max, tzinfo=UTC))
+    rows = db.execute(stmt.group_by(Event.student_id)).all()
     return {sid: count for sid, count in rows if sid is not None}
 
 
-def _collect_overview(db: DBSession, settings: Settings) -> VpnOverviewResponse:
+def _collect_overview(
+    db: DBSession,
+    settings: Settings,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> VpnOverviewResponse:
     """Take one live snapshot, enrich with login counts, and summarise.
 
+    Connection state (online / last seen) is always live; only the login
+    counts and their derived summary honour the [start, end] date range.
     Shared by the JSON overview and the PDF report so both always agree.
     Raises :class:`vpn_service.VpnMonitorError` if the host read fails.
     """
     monitor = vpn_service.WireGuardMonitor(settings)
     result = vpn_service.reconcile_all_vpn_status(db=db, monitor=monitor, settings=settings)
-    counts = _login_counts(db)
+    counts = _login_counts(db, start=start, end=end)
 
     users = [
         VpnUserStatus(
@@ -114,8 +130,29 @@ def _collect_overview(db: DBSession, settings: Settings) -> VpnOverviewResponse:
     return VpnOverviewResponse(enabled=True, summary=summary, users=users)
 
 
+def _validate_range(start: date | None, end: date | None) -> None:
+    if start is not None and end is not None and start > end:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="start date must not be after end date",
+        )
+
+
+def _period_label(start: date | None, end: date | None) -> str:
+    """Human-readable description of the login-count window for the report."""
+    if start is None and end is None:
+        return "All time"
+    if start is not None and end is not None:
+        return f"{start.isoformat()} to {end.isoformat()}"
+    if start is not None:
+        return f"Since {start.isoformat()}"
+    return f"Up to {end.isoformat()}"
+
+
 @router.post("/overview", response_model=VpnOverviewResponse)
 def vpn_overview(
+    start: date | None = Query(default=None),  # noqa: B008 -- FastAPI idiom
+    end: date | None = Query(default=None),  # noqa: B008 -- FastAPI idiom
     db: DBSession = Depends(get_db),  # noqa: B008 -- FastAPI idiom
     settings: Settings = Depends(get_settings),  # noqa: B008 -- FastAPI idiom
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
@@ -123,12 +160,15 @@ def vpn_overview(
     """Report VPN connection state + login counts for every provisioned student.
 
     Reads one live WireGuard snapshot and logs a ``student.vpn_connected`` event
-    per new login. Returns ``enabled=False`` when VPN tracking is disabled.
+    per new login. ``start``/``end`` (inclusive UTC dates) scope the login
+    counts + summary; connection state is always live. Returns
+    ``enabled=False`` when VPN tracking is disabled.
     """
     if not settings.vpn_tracking_enabled:
         return VpnOverviewResponse(enabled=False)
+    _validate_range(start, end)
     try:
-        return _collect_overview(db, settings)
+        return _collect_overview(db, settings, start=start, end=end)
     except vpn_service.VpnMonitorError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"VPN read failed: {exc}"
@@ -141,18 +181,22 @@ def _fmt_last_seen(dt: datetime | None) -> str:
 
 @router.post("/report.pdf")
 def vpn_report_pdf(
+    start: date | None = Query(default=None),  # noqa: B008 -- FastAPI idiom
+    end: date | None = Query(default=None),  # noqa: B008 -- FastAPI idiom
     db: DBSession = Depends(get_db),  # noqa: B008 -- FastAPI idiom
     settings: Settings = Depends(get_settings),  # noqa: B008 -- FastAPI idiom
     _: User = Depends(get_current_user),  # noqa: B008 -- FastAPI idiom
 ) -> Response:
-    """Download the VPN activity overview as a PDF."""
+    """Download the VPN activity overview as a PDF (login counts scoped to the
+    optional [start, end] date range)."""
     if not settings.vpn_tracking_enabled:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="VPN tracking is disabled; nothing to report.",
         )
+    _validate_range(start, end)
     try:
-        data = _collect_overview(db, settings)
+        data = _collect_overview(db, settings, start=start, end=end)
     except vpn_service.VpnMonitorError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"VPN read failed: {exc}"
@@ -173,6 +217,7 @@ def vpn_report_pdf(
     ]
     pdf_bytes = vpn_report.render_overview_pdf(
         generated_at=generated_at,
+        period=_period_label(start, end),
         summary=data.summary.model_dump(),
         rows=rows,
     )

@@ -6,7 +6,7 @@ gate inherited from ``get_current_user``.
 """
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -623,3 +623,61 @@ def test_vpn_report_pdf_download(
 def test_vpn_report_pdf_disabled_returns_409(client) -> None:
     resp = client.post("/api/vpn/report.pdf")
     assert resp.status_code == 409
+
+
+class _OfflineMonitor:
+    """Snapshot with no peers — every student reads as offline."""
+
+    def __init__(self, _settings: Settings) -> None:
+        pass
+
+    def snapshot(self) -> dict[str, PeerStat]:
+        return {}
+
+
+def test_vpn_overview_date_range_filters_login_counts(
+    client, db_session, lab_template, settings, monkeypatch
+) -> None:
+    settings.vpn_tracking_enabled = True
+    # Offline monitor so reconcile adds no new login events of its own.
+    monkeypatch.setattr("app.api.vpn.vpn_service.WireGuardMonitor", _OfflineMonitor)
+    row = _create_session_row(db_session, lab_template, status=SessionStatus.active)
+    student = _create_student_row(
+        db_session, row, ludus_userid="alice", invite_token="t" * 32,
+        status=StudentStatus.ready,
+    )
+    student.vpn_ip = "198.51.100.99"  # not in snapshot -> stays offline
+    now = datetime.now(UTC)
+    for days_ago in (10, 3, 0):
+        db_session.add(
+            Event(
+                session_id=row.id,
+                student_id=student.id,
+                action="student.vpn_connected",
+                created_at=now - timedelta(days=days_ago),
+            )
+        )
+    db_session.commit()
+
+    # All time -> all three logins.
+    r = client.post("/api/vpn/overview").json()
+    assert r["users"][0]["login_count"] == 3
+    assert r["summary"]["total_logins"] == 3
+
+    # Last 5 days -> two (3 days ago + today).
+    start = (now - timedelta(days=5)).date().isoformat()
+    r = client.post(f"/api/vpn/overview?start={start}").json()
+    assert r["users"][0]["login_count"] == 2
+    assert r["summary"]["total_logins"] == 2
+
+    # Narrow window around ~10 days ago -> only the oldest login.
+    s = (now - timedelta(days=12)).date().isoformat()
+    e = (now - timedelta(days=8)).date().isoformat()
+    r = client.post(f"/api/vpn/overview?start={s}&end={e}").json()
+    assert r["users"][0]["login_count"] == 1
+
+    # Inverted range -> 400.
+    bad = client.post(
+        f"/api/vpn/overview?start={now.date().isoformat()}&end={start}"
+    )
+    assert bad.status_code == 400
