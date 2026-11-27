@@ -269,6 +269,14 @@ This was forked from https://github.com/whiteov3rflow/ludus-helm and modified to
   client) - worth doing for consistency, but not bundled into the display
   text change.
 
+- **Lab-manager feature set (capacity trends, scheduled range expiration,
+  Discord notifications, observer role, bulk range actions, audit export,
+  self-service student reset, and more)** - a larger, multi-phase roadmap.
+  Not started yet; see [`docs/roadmap-lab-manager-features.md`](docs/roadmap-lab-manager-features.md)
+  for the full plan, phase breakdown, and the design decisions already made
+  (read-only Observer role with no per-range ownership; Discord notifications
+  limited to provisioning failures and ranges entering `ERROR` state).
+
 ## License
 
 [MIT](LICENSE)
