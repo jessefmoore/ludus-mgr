@@ -35,6 +35,15 @@ data/configs/
 data/backup/
 data/**/*.conf
 
+# VPN tracking: the vpnmon SSH key pair + pinned known_hosts live under data/
+# and must never be committed (private key is a host credential).
+data/vpnmon_ed25519
+data/vpnmon_ed25519.pub
+data/.vpn_known_hosts
+
+# SQLite databases + backups (also under backend/data/)
+backend/data/
+
 # Editor
 .vscode/
 .idea/
